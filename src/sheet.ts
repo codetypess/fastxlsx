@@ -154,6 +154,12 @@ import {
   parseAttributes,
 } from "./utils/xml.js";
 
+/**
+ * Worksheet read/write API.
+ *
+ * Numeric row and column arguments are 1-based across this class:
+ * `1` means the first row or first column, not index `0`.
+ */
 export class Sheet {
   name: string;
   readonly path: string;
@@ -178,6 +184,12 @@ export class Sheet {
     this.relationshipId = options.relationshipId;
   }
 
+  /**
+   * Returns a cached cell handle for an address.
+   *
+   * When using numeric coordinates, both `rowNumber` and numeric `column`
+   * are 1-based.
+   */
   cell(address: string): Cell;
   cell(rowNumber: number, column: number | string): Cell;
   cell(addressOrRowNumber: string | number, column?: number | string): Cell {
@@ -192,6 +204,11 @@ export class Sheet {
     return cell;
   }
 
+  /**
+   * Reads the current cell value.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getCell(address: string): CellValue;
   getCell(rowNumber: number, column: number | string): CellValue;
   getCell(addressOrRowNumber: string | number, column?: number | string): CellValue {
@@ -202,6 +219,11 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).value;
   }
 
+  /**
+   * Reads the raw style id assigned to a cell.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getStyleId(address: string): number | null;
   getStyleId(rowNumber: number, column: number | string): number | null;
   getStyleId(addressOrRowNumber: string | number, column?: number | string): number | null {
@@ -212,6 +234,11 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).styleId;
   }
 
+  /**
+   * Resolves the effective cell style definition.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getStyle(address: string): CellStyleDefinition | null;
   getStyle(rowNumber: number, column: number | string): CellStyleDefinition | null;
   getStyle(addressOrRowNumber: string | number, column?: number | string): CellStyleDefinition | null {
@@ -286,6 +313,11 @@ export class Sheet {
     return style ? this.workbook.getNumberFormat(style.numFmtId) : null;
   }
 
+  /**
+   * Reads the style id assigned to a column.
+   *
+   * Numeric column indexes are 1-based.
+   */
   getColumnStyleId(column: number | string): number | null {
     const columnNumber = normalizeColumnNumber(column);
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
@@ -296,6 +328,11 @@ export class Sheet {
     return styleId === null ? null : this.workbook.getStyle(styleId);
   }
 
+  /**
+   * Copies the style id from one cell to another without changing the value.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   copyStyle(sourceAddress: string, targetAddress: string): void;
   copyStyle(
     sourceRowNumber: number,
@@ -505,6 +542,11 @@ export class Sheet {
     this.workbook.renameSheet(this.name, name);
   }
 
+  /**
+   * Reads the cell formula, if present.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getFormula(address: string): string | null;
   getFormula(rowNumber: number, column: number | string): string | null;
   getFormula(addressOrRowNumber: string | number, column?: number | string): string | null {
@@ -523,6 +565,11 @@ export class Sheet {
     return this.getSheetIndex().usedBounds?.maxColumn ?? 0;
   }
 
+  /**
+   * Reads a header row as strings.
+   *
+   * `headerRowNumber` is 1-based and defaults to the first row.
+   */
   getHeaders(headerRowNumber = 1): string[] {
     assertRowNumber(headerRowNumber);
     return this.getRow(headerRowNumber).map((value) => (typeof value === "string" ? value : ""));
@@ -538,6 +585,11 @@ export class Sheet {
     return styleId === null ? null : this.workbook.getStyle(styleId);
   }
 
+  /**
+   * Reads a worksheet row as a dense array up to the last used column.
+   *
+   * `rowNumber` is 1-based.
+   */
   getRow(rowNumber: number): CellValue[] {
     assertRowNumber(rowNumber);
 
@@ -556,6 +608,11 @@ export class Sheet {
     return values;
   }
 
+  /**
+   * Reads the non-empty cell entries present in a row.
+   *
+   * `rowNumber` is 1-based.
+   */
   getRowEntries(rowNumber: number): CellEntry[] {
     assertRowNumber(rowNumber);
 
@@ -567,6 +624,11 @@ export class Sheet {
     return row.cells.map((cell) => createCellEntry(cell));
   }
 
+  /**
+   * Reads a worksheet column as a dense array up to the last used row.
+   *
+   * Numeric column indexes are 1-based.
+   */
   getColumn(column: number | string): CellValue[] {
     const columnNumber = normalizeColumnNumber(column);
     const cells = [...this.getSheetIndex().cells.values()]
@@ -587,6 +649,11 @@ export class Sheet {
     return values;
   }
 
+  /**
+   * Reads the non-empty cell entries present in a column.
+   *
+   * Numeric column indexes are 1-based.
+   */
   getColumnEntries(column: number | string): CellEntry[] {
     const columnNumber = normalizeColumnNumber(column);
     const entries: CellEntry[] = [];
@@ -644,6 +711,11 @@ export class Sheet {
     return records;
   }
 
+  /**
+   * Reads one header-mapped record row.
+   *
+   * `rowNumber` and `headerRowNumber` are 1-based.
+   */
   getRecord(rowNumber: number, headerRowNumber = 1): Record<string, CellValue> | null {
     assertRowNumber(rowNumber);
 
@@ -892,6 +964,11 @@ export class Sheet {
     this.workbook.removeEntry(tableReference.path);
   }
 
+  /**
+   * Inserts worksheet rows before `rowNumber`.
+   *
+   * `rowNumber` is 1-based.
+   */
   insertRow(rowNumber: number, count = 1): void {
     assertRowNumber(rowNumber);
     assertInsertCount(count);
@@ -930,6 +1007,11 @@ export class Sheet {
     this.updateTableReferences(0, 0, rowNumber, count, "shift");
   }
 
+  /**
+   * Inserts worksheet columns before `column`.
+   *
+   * Numeric column indexes are 1-based.
+   */
   insertColumn(column: number | string, count = 1): void {
     const columnNumber = normalizeColumnNumber(column);
     assertInsertCount(count);
@@ -976,6 +1058,11 @@ export class Sheet {
     this.updateTableReferences(columnNumber, count, 0, 0, "shift");
   }
 
+  /**
+   * Deletes worksheet rows starting at `rowNumber`.
+   *
+   * `rowNumber` is 1-based.
+   */
   deleteRow(rowNumber: number, count = 1): void {
     assertRowNumber(rowNumber);
     assertInsertCount(count);
@@ -1012,6 +1099,11 @@ export class Sheet {
     this.updateTableReferences(0, 0, rowNumber, count, "delete");
   }
 
+  /**
+   * Deletes worksheet columns starting at `column`.
+   *
+   * Numeric column indexes are 1-based.
+   */
   deleteColumn(column: number | string, count = 1): void {
     const columnNumber = normalizeColumnNumber(column);
     assertInsertCount(count);
@@ -1050,6 +1142,11 @@ export class Sheet {
     this.updateTableReferences(columnNumber, count, 0, 0, "delete");
   }
 
+  /**
+   * Writes a cell value.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setCell(address: string, value: CellValue): void;
   setCell(rowNumber: number, column: number | string, value: CellValue): void;
   setCell(addressOrRowNumber: string | number, columnOrValue: number | string | CellValue, value?: CellValue): void {
@@ -1136,6 +1233,11 @@ export class Sheet {
     this.writeSheetXml(index.xml.slice(0, existingCell.start) + index.xml.slice(existingCell.end));
   }
 
+  /**
+   * Writes a formula cell and optional cached value.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setFormula(address: string, formula: string, options?: SetFormulaOptions): void;
   setFormula(rowNumber: number, column: number | string, formula: string, options?: SetFormulaOptions): void;
   setFormula(
@@ -1167,6 +1269,11 @@ export class Sheet {
     return this.revision;
   }
 
+  /**
+   * Writes a header row.
+   *
+   * `headerRowNumber` and `startColumn` are 1-based.
+   */
   setHeaders(headers: string[], headerRowNumber = 1, startColumn = 1): void {
     assertRowNumber(headerRowNumber);
     assertColumnNumber(startColumn);
@@ -1228,6 +1335,11 @@ export class Sheet {
     this.writeSheetXml(updateMergedRanges(this.getSheetIndex().xml, ranges));
   }
 
+  /**
+   * Writes consecutive values into one row.
+   *
+   * `rowNumber` and `startColumn` are 1-based.
+   */
   setRow(rowNumber: number, values: CellValue[], startColumn = 1): void {
     assertRowNumber(rowNumber);
     assertColumnNumber(startColumn);
@@ -1237,6 +1349,11 @@ export class Sheet {
     }
   }
 
+  /**
+   * Appends one row after the current last used row.
+   *
+   * `startColumn` is 1-based. Returns the appended 1-based row number.
+   */
   appendRow(values: CellValue[], startColumn = 1): number {
     assertColumnNumber(startColumn);
     const rowNumber = (this.getSheetIndex().rowNumbers.at(-1) ?? 0) + 1;
@@ -1244,6 +1361,11 @@ export class Sheet {
     return rowNumber;
   }
 
+  /**
+   * Appends multiple rows and returns their 1-based row numbers.
+   *
+   * `startColumn` is 1-based.
+   */
   appendRows(rows: CellValue[][], startColumn = 1): number[] {
     assertColumnNumber(startColumn);
 
@@ -1259,6 +1381,11 @@ export class Sheet {
     return rowNumbers;
   }
 
+  /**
+   * Writes consecutive values into one column.
+   *
+   * Numeric column indexes and `startRow` are 1-based.
+   */
   setColumn(column: number | string, values: CellValue[], startRow = 1): void {
     const columnNumber = normalizeColumnNumber(column);
     assertRowNumber(startRow);

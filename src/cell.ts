@@ -17,6 +17,9 @@ import type {
   SetFormulaOptions,
 } from "./types.js";
 
+/**
+ * Address-based cell handle returned by `Sheet#cell()`.
+ */
 export class Cell {
   readonly address: string;
 
@@ -81,10 +84,16 @@ export class Cell {
     return this.getSnapshot().value;
   }
 
+  /**
+   * Writes a formula to this cell.
+   */
   setFormula(formula: string, options: SetFormulaOptions = {}): void {
     this.sheet.setFormula(this.address, formula, options);
   }
 
+  /**
+   * Writes a value to this cell.
+   */
   setValue(value: CellValue): void {
     this.sheet.setCell(this.address, value);
   }
