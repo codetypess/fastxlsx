@@ -161,8 +161,19 @@ import {
  * `1` means the first row or first column, not index `0`.
  */
 export class Sheet {
+  /**
+   * Current worksheet name as stored in workbook metadata.
+   */
   name: string;
+
+  /**
+   * Worksheet part path inside the OOXML package.
+   */
   readonly path: string;
+
+  /**
+   * Workbook relationship id that points to this worksheet part.
+   */
   readonly relationshipId: string;
 
   private readonly cellHandles = new Map<string, Cell>();
@@ -170,6 +181,12 @@ export class Sheet {
   private readonly workbook: Workbook;
   private sheetIndex?: SheetIndex;
 
+  /**
+   * Creates a worksheet handle bound to a parent workbook.
+   *
+   * Most callers obtain instances from {@link Workbook.getSheet},
+   * {@link Workbook.getSheets}, or related workbook APIs.
+   */
   constructor(
     workbook: Workbook,
     options: {
@@ -249,6 +266,11 @@ export class Sheet {
     return this.workbook.getStyle(styleId ?? 0);
   }
 
+  /**
+   * Resolves the alignment portion of a cell style.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getAlignment(address: string): CellStyleAlignment | null;
   getAlignment(rowNumber: number, column: number | string): CellStyleAlignment | null;
   getAlignment(addressOrRowNumber: string | number, column?: number | string): CellStyleAlignment | null {
@@ -259,6 +281,11 @@ export class Sheet {
     return style?.alignment ?? null;
   }
 
+  /**
+   * Resolves the font portion of a cell style.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getFont(address: string): CellFontDefinition | null;
   getFont(rowNumber: number, column: number | string): CellFontDefinition | null;
   getFont(addressOrRowNumber: string | number, column?: number | string): CellFontDefinition | null {
@@ -269,6 +296,11 @@ export class Sheet {
     return style ? this.workbook.getFont(style.fontId) : null;
   }
 
+  /**
+   * Resolves the fill portion of a cell style.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getFill(address: string): CellFillDefinition | null;
   getFill(rowNumber: number, column: number | string): CellFillDefinition | null;
   getFill(addressOrRowNumber: string | number, column?: number | string): CellFillDefinition | null {
@@ -279,6 +311,11 @@ export class Sheet {
     return style ? this.workbook.getFill(style.fillId) : null;
   }
 
+  /**
+   * Reads the solid background color for a cell, if one is set.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getBackgroundColor(address: string): string | null;
   getBackgroundColor(rowNumber: number, column: number | string): string | null;
   getBackgroundColor(addressOrRowNumber: string | number, column?: number | string): string | null {
@@ -293,6 +330,11 @@ export class Sheet {
     return fill.fgColor?.rgb ?? null;
   }
 
+  /**
+   * Resolves the border portion of a cell style.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getBorder(address: string): CellBorderDefinition | null;
   getBorder(rowNumber: number, column: number | string): CellBorderDefinition | null;
   getBorder(addressOrRowNumber: string | number, column?: number | string): CellBorderDefinition | null {
@@ -303,6 +345,11 @@ export class Sheet {
     return style ? this.workbook.getBorder(style.borderId) : null;
   }
 
+  /**
+   * Resolves the number format portion of a cell style.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   getNumberFormat(address: string): CellNumberFormatDefinition | null;
   getNumberFormat(rowNumber: number, column: number | string): CellNumberFormatDefinition | null;
   getNumberFormat(addressOrRowNumber: string | number, column?: number | string): CellNumberFormatDefinition | null {
@@ -323,6 +370,11 @@ export class Sheet {
     return parseColumnStyleId(this.getSheetIndex().xml, columnNumber);
   }
 
+  /**
+   * Reads the effective style definition for a whole column.
+   *
+   * Numeric column indexes are 1-based.
+   */
   getColumnStyle(column: number | string): CellStyleDefinition | null {
     const styleId = this.getColumnStyleId(column);
     return styleId === null ? null : this.workbook.getStyle(styleId);
@@ -355,6 +407,11 @@ export class Sheet {
     this.setStyleId(targetAddress, this.getStyleId(sourceAddress));
   }
 
+  /**
+   * Clones the current cell style with a patch and applies it.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setStyle(address: string, patch: CellStylePatch): number;
   setStyle(rowNumber: number, column: number | string, patch: CellStylePatch): number;
   setStyle(
@@ -369,6 +426,11 @@ export class Sheet {
     return this.cloneStyle(addressOrRowNumber, (columnOrPatch as CellStylePatch | undefined) ?? {});
   }
 
+  /**
+   * Clones the current style and replaces only the alignment part.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setAlignment(address: string, patch: CellStyleAlignmentPatch | null): number;
   setAlignment(rowNumber: number, column: number | string, patch: CellStyleAlignmentPatch | null): number;
   setAlignment(
@@ -389,6 +451,11 @@ export class Sheet {
     return nextStyleId;
   }
 
+  /**
+   * Clones the current style and replaces only the font part.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setFont(address: string, patch: CellFontPatch): number;
   setFont(rowNumber: number, column: number | string, patch: CellFontPatch): number;
   setFont(
@@ -416,6 +483,11 @@ export class Sheet {
     return nextFontId;
   }
 
+  /**
+   * Clones the current style and replaces only the fill part.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setFill(address: string, patch: CellFillPatch): number;
   setFill(rowNumber: number, column: number | string, patch: CellFillPatch): number;
   setFill(
@@ -443,6 +515,11 @@ export class Sheet {
     return nextFillId;
   }
 
+  /**
+   * Convenience helper for setting a solid background color.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setBackgroundColor(address: string, color: string | null): number;
   setBackgroundColor(rowNumber: number, column: number | string, color: string | null): number;
   setBackgroundColor(
@@ -471,6 +548,11 @@ export class Sheet {
     return this.setFill(addressOrRowNumber, fillPatch);
   }
 
+  /**
+   * Clones the current style and replaces only the border part.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setBorder(address: string, patch: CellBorderPatch): number;
   setBorder(rowNumber: number, column: number | string, patch: CellBorderPatch): number;
   setBorder(
@@ -498,6 +580,11 @@ export class Sheet {
     return nextBorderId;
   }
 
+  /**
+   * Clones the current style and replaces only the number format part.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setNumberFormat(address: string, formatCode: string): number;
   setNumberFormat(rowNumber: number, column: number | string, formatCode: string): number;
   setNumberFormat(
@@ -521,6 +608,11 @@ export class Sheet {
     return nextNumFmtId;
   }
 
+  /**
+   * Clones the current cell style and returns the new style id.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   cloneStyle(address: string, patch?: CellStylePatch): number;
   cloneStyle(rowNumber: number, column: number | string, patch?: CellStylePatch): number;
   cloneStyle(
@@ -538,6 +630,9 @@ export class Sheet {
     return nextStyleId;
   }
 
+  /**
+   * Renames this worksheet through the parent workbook.
+   */
   rename(name: string): void {
     this.workbook.renameSheet(this.name, name);
   }
@@ -557,10 +652,16 @@ export class Sheet {
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).formula;
   }
 
+  /**
+   * Last used worksheet row number.
+   */
   get rowCount(): number {
     return this.getSheetIndex().usedBounds?.maxRow ?? 0;
   }
 
+  /**
+   * Last used worksheet column number.
+   */
   get columnCount(): number {
     return this.getSheetIndex().usedBounds?.maxColumn ?? 0;
   }
@@ -575,11 +676,21 @@ export class Sheet {
     return this.getRow(headerRowNumber).map((value) => (typeof value === "string" ? value : ""));
   }
 
+  /**
+   * Reads the row-level style id.
+   *
+   * `rowNumber` is 1-based.
+   */
   getRowStyleId(rowNumber: number): number | null {
     assertRowNumber(rowNumber);
     return parseRowStyleId(this.getSheetIndex().rows.get(rowNumber)?.attributesSource);
   }
 
+  /**
+   * Reads the effective style definition for a row.
+   *
+   * `rowNumber` is 1-based.
+   */
   getRowStyle(rowNumber: number): CellStyleDefinition | null {
     const styleId = this.getRowStyleId(rowNumber);
     return styleId === null ? null : this.workbook.getStyle(styleId);
@@ -669,6 +780,12 @@ export class Sheet {
     return entries;
   }
 
+  /**
+   * Reads rows below the header as key-value records.
+   *
+   * Header names are taken from `headerRowNumber`, which is 1-based.
+   * Blank or non-string headers are skipped.
+   */
   getRecords(headerRowNumber = 1): Array<Record<string, CellValue>> {
     const headers = this.getRow(headerRowNumber);
     let lastHeaderColumn = 0;
@@ -739,6 +856,9 @@ export class Sheet {
     return record;
   }
 
+  /**
+   * Reads a rectangular cell range using A1 notation.
+   */
   getRange(range: string): CellValue[][] {
     const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
     const values: CellValue[][] = [];
@@ -756,10 +876,16 @@ export class Sheet {
     return values;
   }
 
+  /**
+   * Returns all populated cell entries in row-major order.
+   */
   getCellEntries(): CellEntry[] {
     return Array.from(this.iterCellEntries());
   }
 
+  /**
+   * Iterates populated cells in row-major order.
+   */
   *iterCellEntries(): IterableIterator<CellEntry> {
     const index = this.getSheetIndex();
 
@@ -775,38 +901,65 @@ export class Sheet {
     }
   }
 
+  /**
+   * Returns the current used range in A1 notation.
+   */
   getUsedRange(): string | null {
     return formatUsedRangeBounds(this.getSheetIndex().usedBounds);
   }
 
+  /**
+   * Lists merged ranges in normalized A1 notation.
+   */
   getMergedRanges(): string[] {
     return parseMergedRanges(this.getSheetIndex().xml);
   }
 
+  /**
+   * Reads the worksheet auto-filter range, if present.
+   */
   getAutoFilter(): string | null {
     return parseSheetAutoFilter(this.getSheetIndex().xml);
   }
 
+  /**
+   * Reads the current freeze pane state.
+   */
   getFreezePane(): FreezePane | null {
     return parseSheetFreezePane(this.getSheetIndex().xml);
   }
 
+  /**
+   * Reads the current worksheet selection.
+   */
   getSelection(): SheetSelection | null {
     return parseSheetSelection(this.getSheetIndex().xml);
   }
 
+  /**
+   * Lists worksheet data validation rules.
+   */
   getDataValidations(): DataValidation[] {
     return parseSheetDataValidations(this.getSheetIndex().xml);
   }
 
+  /**
+   * Lists worksheet tables with their ranges and backing part paths.
+   */
   getTables(): Array<{ name: string; displayName: string; range: string; path: string }> {
     return parseSheetTables(this.getTableReferences(), (path) => this.workbook.readEntryText(path));
   }
 
+  /**
+   * Lists worksheet hyperlinks.
+   */
   getHyperlinks(): Hyperlink[] {
     return parseSheetHyperlinks(this.getSheetIndex().xml, parseHyperlinkRelationshipTargets(this.readSheetRelationshipsXml()));
   }
 
+  /**
+   * Creates or replaces a hyperlink at the given cell address.
+   */
   setHyperlink(address: string, target: string, options: SetHyperlinkOptions = {}): void {
     const normalizedAddress = normalizeCellAddress(address);
     if (options.text !== undefined) {
@@ -824,6 +977,9 @@ export class Sheet {
     this.writeSheetRelationshipsXml(nextState.relationshipsXml);
   }
 
+  /**
+   * Removes a hyperlink from the given cell address.
+   */
   removeHyperlink(address: string): void {
     const normalizedAddress = normalizeCellAddress(address);
     const currentSheetXml = this.getSheetIndex().xml;
@@ -839,6 +995,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Sets the worksheet auto-filter range.
+   */
   setAutoFilter(range: string): void {
     const normalizedRange = normalizeRangeRef(range);
     const nextSheetXml = upsertAutoFilterInSheetXml(this.getSheetIndex().xml, normalizedRange);
@@ -848,6 +1007,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Removes the worksheet auto-filter.
+   */
   removeAutoFilter(): void {
     const nextSheetXml = removeAutoFilterFromSheetXml(this.getSheetIndex().xml);
 
@@ -856,6 +1018,11 @@ export class Sheet {
     }
   }
 
+  /**
+   * Freezes the top rows and left columns.
+   *
+   * Numeric arguments are counts, not zero-based indexes.
+   */
   freezePane(columnCount: number, rowCount = 0): void {
     assertFreezeSplit(columnCount, rowCount);
     const nextSheetXml = upsertFreezePaneInSheetXml(this.getSheetIndex().xml, columnCount, rowCount);
@@ -865,6 +1032,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Clears any existing freeze pane state.
+   */
   unfreezePane(): void {
     const nextSheetXml = removeFreezePaneFromSheetXml(this.getSheetIndex().xml);
 
@@ -873,6 +1043,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Sets the active cell and selected range.
+   */
   setSelection(activeCell: string, range = activeCell): void {
     const normalizedActiveCell = normalizeCellAddress(activeCell);
     const normalizedRange = normalizeSqref(range);
@@ -887,6 +1060,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Creates or replaces a data validation rule for a range.
+   */
   setDataValidation(range: string, options: SetDataValidationOptions = {}): void {
     const normalizedRange = normalizeSqref(range);
     const nextSheetXml = upsertDataValidationInSheetXml(
@@ -900,6 +1076,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Removes data validation rules matching a range.
+   */
   removeDataValidation(range: string): void {
     const normalizedRange = normalizeSqref(range);
     const nextSheetXml = removeDataValidationFromSheetXml(this.getSheetIndex().xml, normalizedRange);
@@ -909,6 +1088,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Adds a table part for a worksheet range.
+   */
   addTable(
     range: string,
   options: { name?: string } = {},
@@ -947,6 +1129,9 @@ export class Sheet {
     };
   }
 
+  /**
+   * Removes a worksheet table by table or display name.
+   */
   removeTable(name: string): void {
     const tableReference = findSheetTableReferenceByName(
       this.getTableReferences(),
@@ -1159,6 +1344,11 @@ export class Sheet {
     );
   }
 
+  /**
+   * Assigns a raw style id to a cell.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   setStyleId(address: string, styleId: number | null): void;
   setStyleId(rowNumber: number, column: number | string, styleId: number | null): void;
   setStyleId(
@@ -1185,6 +1375,11 @@ export class Sheet {
     );
   }
 
+  /**
+   * Assigns a raw style id to a whole column.
+   *
+   * Numeric column indexes are 1-based.
+   */
   setColumnStyleId(column: number | string, styleId: number | null): void {
     const columnNumber = normalizeColumnNumber(column);
     assertStyleId(styleId);
@@ -1200,16 +1395,27 @@ export class Sheet {
     }
   }
 
+  /**
+   * Clones and applies a column style.
+   */
   setColumnStyle(column: number | string, patch: CellStylePatch): number {
     return this.cloneColumnStyle(column, patch);
   }
 
+  /**
+   * Clones the effective column style and returns the new style id.
+   */
   cloneColumnStyle(column: number | string, patch: CellStylePatch = {}): number {
     const nextStyleId = this.workbook.cloneStyle(this.getColumnStyleId(column) ?? 0, patch);
     this.setColumnStyleId(column, nextStyleId);
     return nextStyleId;
   }
 
+  /**
+   * Removes a cell node from the worksheet.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
   deleteCell(address: string): void;
   deleteCell(rowNumber: number, column: number | string): void;
   deleteCell(addressOrRowNumber: string | number, column?: number | string): void {
@@ -1265,6 +1471,9 @@ export class Sheet {
     );
   }
 
+  /**
+   * Returns the current internal revision counter for cache invalidation.
+   */
   getRevision(): number {
     return this.revision;
   }
@@ -1280,6 +1489,11 @@ export class Sheet {
     this.setRow(headerRowNumber, headers, startColumn);
   }
 
+  /**
+   * Assigns a raw style id to a whole row.
+   *
+   * `rowNumber` is 1-based.
+   */
   setRowStyleId(rowNumber: number, styleId: number | null): void {
     assertRowNumber(rowNumber);
     assertStyleId(styleId);
@@ -1308,10 +1522,16 @@ export class Sheet {
     );
   }
 
+  /**
+   * Clones and applies a row style.
+   */
   setRowStyle(rowNumber: number, patch: CellStylePatch): number {
     return this.cloneRowStyle(rowNumber, patch);
   }
 
+  /**
+   * Clones the effective row style and returns the new style id.
+   */
   cloneRowStyle(rowNumber: number, patch: CellStylePatch = {}): number {
     assertRowNumber(rowNumber);
     const nextStyleId = this.workbook.cloneStyle(this.getRowStyleId(rowNumber) ?? 0, patch);
@@ -1319,6 +1539,9 @@ export class Sheet {
     return nextStyleId;
   }
 
+  /**
+   * Adds a merged range if it is not already present.
+   */
   addMergedRange(range: string): void {
     const normalizedRange = normalizeRangeRef(range);
     const ranges = this.getMergedRanges();
@@ -1329,6 +1552,9 @@ export class Sheet {
     this.writeSheetXml(updateMergedRanges(this.getSheetIndex().xml, [...ranges, normalizedRange]));
   }
 
+  /**
+   * Removes a merged range by normalized A1 reference.
+   */
   removeMergedRange(range: string): void {
     const normalizedRange = normalizeRangeRef(range);
     const ranges = this.getMergedRanges().filter((candidate) => candidate !== normalizedRange);
@@ -1395,6 +1621,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Appends one header-mapped record after the current used range.
+   */
   addRecord(record: Record<string, CellValue>, headerRowNumber = 1): void {
     const headerMap = this.getHeaderMap(headerRowNumber);
     if (Object.keys(record).length === 0) {
@@ -1405,6 +1634,9 @@ export class Sheet {
     this.writeRecordRow(nextRowNumber, record, headerMap, false);
   }
 
+  /**
+   * Appends multiple header-mapped records after the current used range.
+   */
   addRecords(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
     if (records.length === 0) {
       return;
@@ -1424,6 +1656,11 @@ export class Sheet {
     }
   }
 
+  /**
+   * Writes one header-mapped record into an existing row.
+   *
+   * `rowNumber` and `headerRowNumber` are 1-based.
+   */
   setRecord(rowNumber: number, record: Record<string, CellValue>, headerRowNumber = 1): void {
     assertRowNumber(rowNumber);
 
@@ -1435,6 +1672,11 @@ export class Sheet {
     this.writeRecordRow(rowNumber, record, headerMap, false);
   }
 
+  /**
+   * Replaces the record set below a header row.
+   *
+   * `headerRowNumber` is 1-based.
+   */
   setRecords(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
     const headerMap = this.getHeaderMap(headerRowNumber);
     const existingRecordRows = this.getSheetIndex().rowNumbers.filter(
@@ -1452,6 +1694,11 @@ export class Sheet {
     this.deleteRecords(rowsToDelete, headerRowNumber);
   }
 
+  /**
+   * Deletes a single record row.
+   *
+   * `rowNumber` and `headerRowNumber` are 1-based.
+   */
   deleteRecord(rowNumber: number, headerRowNumber = 1): void {
     assertRowNumber(rowNumber);
     assertRowNumber(headerRowNumber);
@@ -1469,6 +1716,11 @@ export class Sheet {
     this.writeSheetXml(nextSheetXml);
   }
 
+  /**
+   * Deletes multiple record rows.
+   *
+   * `headerRowNumber` is 1-based.
+   */
   deleteRecords(rowNumbers: number[], headerRowNumber = 1): void {
     assertRowNumber(headerRowNumber);
 
@@ -1480,6 +1732,9 @@ export class Sheet {
     }
   }
 
+  /**
+   * Reads the full parsed cell snapshot for an address.
+   */
   readCellSnapshot(address: string): CellSnapshot {
     const locatedCell = this.getSheetIndex().cells.get(normalizeCellAddress(address));
     return parseCellSnapshot(locatedCell);
@@ -1515,6 +1770,9 @@ export class Sheet {
     );
   }
 
+  /**
+   * Writes a rectangular value matrix starting at an address.
+   */
   setRange(startAddress: string, values: CellValue[][]): void {
     const normalizedStartAddress = normalizeCellAddress(startAddress);
     if (values.length === 0) {

@@ -173,6 +173,12 @@ const BUILTIN_NUMBER_FORMATS = new Map<number, string>([
   [49, "@"],
 ]);
 
+/**
+ * Workbook-level API for reading and mutating OOXML spreadsheet packages.
+ *
+ * Style, font, fill, border, and number format ids on this class are the raw
+ * OOXML ids from `styles.xml`. They are not worksheet row/column indexes.
+ */
 export class Workbook {
   private readonly adapter: Zip;
   private readonly entryOrder: string[];
@@ -181,6 +187,12 @@ export class Workbook {
   private sharedStringsCache?: string[];
   private stylesCache?: StylesCache | null;
 
+  /**
+   * Creates a workbook wrapper around archive entries.
+   *
+   * Use {@link Workbook.open} for files on disk or {@link Workbook.fromEntries}
+   * when the package is already loaded in memory.
+   */
   constructor(
     entries: Iterable<ArchiveEntry>,
     adapter = new Zip(),
@@ -197,39 +209,63 @@ export class Workbook {
     }
   }
 
+  /**
+   * Opens an `.xlsx` file from disk.
+   */
   static async open(filePath: string): Promise<Workbook> {
     const adapter = new Zip();
     const entries = await adapter.readArchive(filePath);
     return new Workbook(entries, adapter, { cloneEntryData: false });
   }
 
+  /**
+   * Creates a workbook from archive entries that are already in memory.
+   */
   static fromEntries(entries: Iterable<ArchiveEntry>): Workbook {
     return new Workbook(entries);
   }
 
+  /**
+   * Lists archive entry paths in workbook order.
+   */
   listEntries(): string[] {
     return [...this.entryOrder];
   }
 
+  /**
+   * Returns worksheet objects in workbook order.
+   */
   getSheets(): Sheet[] {
     return [...this.getWorkbookContext().sheets];
   }
 
+  /**
+   * Returns a worksheet by name.
+   */
   getSheet(sheetName: string): Sheet {
     return requireSheetByName(this.getWorkbookContext().sheets, sheetName);
   }
 
+  /**
+   * Returns the currently active visible sheet according to workbook metadata.
+   */
   getActiveSheet(): Sheet {
     const context = this.getWorkbookContext();
     const activeSheetIndex = parseActiveSheetIndex(this.readEntryText(context.workbookPath), context.sheets.length);
     return context.sheets[activeSheetIndex] ?? context.sheets[0]!;
   }
 
+  /**
+   * Reads a cell style definition by raw OOXML `cellXf` id.
+   */
   getStyle(styleId: number): CellStyleDefinition | null {
     assertStyleId(styleId);
     return cloneCellStyleDefinition(this.getStylesCache()?.cellXfs[styleId]?.definition ?? null);
   }
 
+  /**
+   * Reads a number format definition by raw OOXML `numFmtId`.
+   */
   getNumberFormat(numFmtId: number): CellNumberFormatDefinition | null {
     assertStyleId(numFmtId);
     const styles = this.getStylesCache();
@@ -254,21 +290,33 @@ export class Workbook {
     return null;
   }
 
+  /**
+   * Reads a font definition by raw OOXML font id.
+   */
   getFont(fontId: number): CellFontDefinition | null {
     assertStyleId(fontId);
     return cloneCellFontDefinition(this.getStylesCache()?.fonts[fontId]?.definition ?? null);
   }
 
+  /**
+   * Reads a fill definition by raw OOXML fill id.
+   */
   getFill(fillId: number): CellFillDefinition | null {
     assertStyleId(fillId);
     return cloneCellFillDefinition(this.getStylesCache()?.fills[fillId]?.definition ?? null);
   }
 
+  /**
+   * Reads a border definition by raw OOXML border id.
+   */
   getBorder(borderId: number): CellBorderDefinition | null {
     assertStyleId(borderId);
     return cloneCellBorderDefinition(this.getStylesCache()?.borders[borderId]?.definition ?? null);
   }
 
+  /**
+   * Rewrites an existing custom number format in `styles.xml`.
+   */
   updateNumberFormat(numFmtId: number, formatCode: string): void {
     assertStyleId(numFmtId);
     assertFormatCode(formatCode);
@@ -289,6 +337,9 @@ export class Workbook {
     this.writeEntryText(styles.path, upsertNumberFormatInStylesXml(styles.xml, numFmtId, formatCode));
   }
 
+  /**
+   * Clones a builtin or custom number format and returns the new `numFmtId`.
+   */
   cloneNumberFormat(numFmtId: number, formatCode?: string): number {
     assertStyleId(numFmtId);
     if (formatCode !== undefined) {
@@ -310,6 +361,9 @@ export class Workbook {
     return nextNumFmtId;
   }
 
+  /**
+   * Returns the existing `numFmtId` for a format code or creates one.
+   */
   ensureNumberFormat(formatCode: string): number {
     assertFormatCode(formatCode);
 
@@ -335,6 +389,9 @@ export class Workbook {
     return nextNumFmtId;
   }
 
+  /**
+   * Rewrites an existing font definition by raw OOXML font id.
+   */
   updateFont(fontId: number, patch: CellFontPatch): void {
     assertStyleId(fontId);
     assertCellFontPatch(patch);
@@ -355,6 +412,9 @@ export class Workbook {
     );
   }
 
+  /**
+   * Clones a font definition and returns the new raw OOXML font id.
+   */
   cloneFont(fontId: number, patch: CellFontPatch = {}): number {
     assertStyleId(fontId);
     assertCellFontPatch(patch);
@@ -377,6 +437,9 @@ export class Workbook {
     return nextFontId;
   }
 
+  /**
+   * Rewrites an existing fill definition by raw OOXML fill id.
+   */
   updateFill(fillId: number, patch: CellFillPatch): void {
     assertStyleId(fillId);
     assertCellFillPatch(patch);
@@ -397,6 +460,9 @@ export class Workbook {
     );
   }
 
+  /**
+   * Clones a fill definition and returns the new raw OOXML fill id.
+   */
   cloneFill(fillId: number, patch: CellFillPatch = {}): number {
     assertStyleId(fillId);
     assertCellFillPatch(patch);
@@ -419,6 +485,9 @@ export class Workbook {
     return nextFillId;
   }
 
+  /**
+   * Rewrites an existing border definition by raw OOXML border id.
+   */
   updateBorder(borderId: number, patch: CellBorderPatch): void {
     assertStyleId(borderId);
     assertCellBorderPatch(patch);
@@ -439,6 +508,9 @@ export class Workbook {
     );
   }
 
+  /**
+   * Clones a border definition and returns the new raw OOXML border id.
+   */
   cloneBorder(borderId: number, patch: CellBorderPatch = {}): number {
     assertStyleId(borderId);
     assertCellBorderPatch(patch);
@@ -461,6 +533,9 @@ export class Workbook {
     return nextBorderId;
   }
 
+  /**
+   * Rewrites an existing `cellXf` style by raw OOXML style id.
+   */
   updateStyle(styleId: number, patch: CellStylePatch): void {
     assertStyleId(styleId);
     assertCellStylePatch(patch);
@@ -481,6 +556,9 @@ export class Workbook {
     );
   }
 
+  /**
+   * Clones a `cellXf` style and returns the new raw OOXML style id.
+   */
   cloneStyle(styleId: number, patch: CellStylePatch = {}): number {
     assertStyleId(styleId);
     assertCellStylePatch(patch);
@@ -503,6 +581,11 @@ export class Workbook {
     return nextStyleId;
   }
 
+  /**
+   * Sets the active sheet tab.
+   *
+   * Hidden sheets cannot be activated.
+   */
   setActiveSheet(sheetName: string): Sheet {
     const context = this.getWorkbookContext();
     const targetIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
@@ -522,6 +605,9 @@ export class Workbook {
     return this.getSheet(sheetName);
   }
 
+  /**
+   * Reads the workbook visibility state for a sheet.
+   */
   getSheetVisibility(sheetName: string): SheetVisibility {
     const context = this.getWorkbookContext();
     const sheet = requireSheetByName(context.sheets, sheetName);
@@ -529,6 +615,11 @@ export class Workbook {
     return parseSheetVisibility(this.readEntryText(context.workbookPath), sheet.relationshipId);
   }
 
+  /**
+   * Updates the workbook visibility state for a sheet.
+   *
+   * The workbook must always keep at least one visible sheet.
+   */
   setSheetVisibility(sheetName: string, visibility: SheetVisibility): void {
     assertSheetVisibility(visibility);
 
@@ -554,11 +645,17 @@ export class Workbook {
     );
   }
 
+  /**
+   * Lists workbook defined names, including sheet-scoped names.
+   */
   getDefinedNames(): DefinedName[] {
     const context = this.getWorkbookContext();
     return parseDefinedNames(this.readEntryText(context.workbookPath), context.sheets);
   }
 
+  /**
+   * Reads one defined name value by name and optional sheet scope.
+   */
   getDefinedName(name: string, scope?: string): string | null {
     const definedName = this.getDefinedNames().find(
       (candidate) => candidate.name === name && candidate.scope === (scope ?? null),
@@ -566,6 +663,11 @@ export class Workbook {
     return definedName?.value ?? null;
   }
 
+  /**
+   * Creates or replaces a defined name.
+   *
+   * When `options.scope` is set, the name is sheet-scoped.
+   */
   setDefinedName(name: string, value: string, options: SetDefinedNameOptions = {}): void {
     assertDefinedName(name);
 
@@ -591,6 +693,9 @@ export class Workbook {
     this.writeEntryText(workbookPath, insertDefinedNameIntoWorkbookXml(workbookXml, nextDefinedNameXml));
   }
 
+  /**
+   * Deletes a defined name by name and optional sheet scope.
+   */
   deleteDefinedName(name: string, scope?: string): void {
     const context = this.getWorkbookContext();
     const localSheetId = resolveLocalSheetId(context.sheets, scope ?? null);
@@ -604,6 +709,9 @@ export class Workbook {
     }
   }
 
+  /**
+   * Renames a sheet and rewrites workbook-level references.
+   */
   renameSheet(currentSheetName: string, nextSheetName: string): Sheet {
     assertSheetName(nextSheetName);
 
@@ -637,6 +745,9 @@ export class Workbook {
     return renamedSheet;
   }
 
+  /**
+   * Reorders a sheet to a zero-based workbook position.
+   */
   moveSheet(sheetName: string, targetIndex: number): Sheet {
     const context = this.getWorkbookContext();
     const sourceIndex = context.sheets.findIndex((sheet) => sheet.name === sheetName);
@@ -661,6 +772,9 @@ export class Workbook {
     return this.getSheet(sheetName);
   }
 
+  /**
+   * Appends a new worksheet to the workbook.
+   */
   addSheet(sheetName: string): Sheet {
     assertSheetName(sheetName);
 
@@ -707,6 +821,11 @@ export class Workbook {
     return this.getSheet(sheetName);
   }
 
+  /**
+   * Deletes a worksheet and rewrites workbook-level references.
+   *
+   * The last remaining sheet cannot be deleted.
+   */
   deleteSheet(sheetName: string): void {
     const context = this.getWorkbookContext();
     if (context.sheets.length === 1) {
@@ -758,10 +877,16 @@ export class Workbook {
     }
   }
 
+  /**
+   * Writes the current workbook contents to disk as an `.xlsx` file.
+   */
   async save(filePath: string): Promise<void> {
     await this.adapter.writeArchive(filePath, this.getEntriesView());
   }
 
+  /**
+   * Exports the workbook as detached archive entries.
+   */
   toEntries(): ArchiveEntry[] {
     return this.entryOrder.map((path) => {
       const data = this.entries.get(path);
@@ -794,10 +919,16 @@ export class Workbook {
     return this.workbookContext;
   }
 
+  /**
+   * Returns the shared strings table as plain strings.
+   */
   readSharedStrings(): string[] {
     return [...this.getSharedStringsCache()];
   }
 
+  /**
+   * Reads one shared string by zero-based shared string table index.
+   */
   getSharedString(index: number): string | null {
     return this.getSharedStringsCache()[index] ?? null;
   }
@@ -822,6 +953,9 @@ export class Workbook {
     return this.stylesCache;
   }
 
+  /**
+   * Internal helper used by sheet structure edits to keep defined names in sync.
+   */
   rewriteDefinedNamesForSheetStructure(
     sheetName: string,
     targetColumnNumber: number,
