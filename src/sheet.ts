@@ -45,6 +45,7 @@ import {
 } from "./sheet/sheet-common.js";
 import { formatUsedRangeBounds, updateDimensionRef } from "./sheet/sheet-dimension.js";
 import { parseMergedRanges, updateMergedRanges } from "./sheet/sheet-merge.js";
+import { buildHeaderMap, writeRecordValues } from "./sheet/sheet-records.js";
 import {
   assertStyleId,
   resolveCloneStylePatch,
@@ -1405,17 +1406,7 @@ export class Sheet {
 
   private getHeaderMap(headerRowNumber: number): Map<string, number> {
     assertRowNumber(headerRowNumber);
-
-    const headers = this.getRow(headerRowNumber);
-    const headerMap = new Map<string, number>();
-
-    headers.forEach((value, index) => {
-      if (typeof value === "string" && value.length > 0 && !headerMap.has(value)) {
-        headerMap.set(value, index + 1);
-      }
-    });
-
-    return headerMap;
+    return buildHeaderMap(this.getRow(headerRowNumber));
   }
 
   private writeRecordRow(
@@ -1424,30 +1415,9 @@ export class Sheet {
     headerMap: Map<string, number>,
     replaceMissingKeys: boolean,
   ): void {
-    const keys = Object.keys(record);
-
-    for (const key of keys) {
-      if (!headerMap.has(key)) {
-        throw new XlsxError(`Header not found: ${key}`);
-      }
-    }
-
-    if (replaceMissingKeys) {
-      for (const [header, columnNumber] of headerMap) {
-        const nextValue = Object.hasOwn(record, header) ? record[header] ?? null : null;
-        this.setCell(makeCellAddress(rowNumber, columnNumber), nextValue);
-      }
-      return;
-    }
-
-    for (const key of keys) {
-      const columnNumber = headerMap.get(key);
-      if (!columnNumber) {
-        continue;
-      }
-
-      this.setCell(makeCellAddress(rowNumber, columnNumber), record[key] ?? null);
-    }
+    writeRecordValues(rowNumber, record, headerMap, replaceMissingKeys, (address, value) =>
+      this.setCell(address, value),
+    );
   }
 
   setRange(startAddress: string, values: CellValue[][]): void {
