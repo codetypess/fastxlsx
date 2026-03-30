@@ -41,6 +41,15 @@ import {
 } from "./sheet/sheet-address.js";
 import { parseMergedRanges, updateMergedRanges } from "./sheet/sheet-merge.js";
 import {
+  assertStyleId,
+  resolveCloneStylePatch,
+  resolveSetAlignmentPatch,
+  resolveSetBorderPatch,
+  resolveSetFillPatch,
+  resolveSetFontPatch,
+  resolveSetStyleId,
+} from "./sheet/sheet-style-input.js";
+import {
   buildEmptyStyledRowXml,
   buildStyledRowXml,
   parseColumnStyleId,
@@ -1648,67 +1657,6 @@ function assertFreezeSplit(columnCount: number, rowCount: number): void {
   }
 }
 
-function assertStyleId(styleId: number | null): void {
-  if (styleId !== null && (!Number.isInteger(styleId) || styleId < 0)) {
-    throw new XlsxError(`Invalid style id: ${styleId}`);
-  }
-}
-
-function resolveCloneStylePatch(
-  addressOrRowNumber: string | number,
-  columnOrPatch: number | string | CellStylePatch | undefined,
-  patch: CellStylePatch | undefined,
-): CellStylePatch {
-  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : ((columnOrPatch as CellStylePatch | undefined) ?? {});
-}
-
-function resolveSetAlignmentPatch(
-  addressOrRowNumber: string | number,
-  columnOrPatch: number | string | CellStyleAlignmentPatch | null,
-  patch: CellStyleAlignmentPatch | null | undefined,
-): CellStyleAlignmentPatch | null {
-  if (typeof addressOrRowNumber === "number") {
-    return patch === undefined ? {} : patch;
-  }
-
-  return columnOrPatch as CellStyleAlignmentPatch | null;
-}
-
-function resolveSetFontPatch(
-  addressOrRowNumber: string | number,
-  columnOrPatch: number | string | CellFontPatch,
-  patch: CellFontPatch | undefined,
-): CellFontPatch {
-  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : (columnOrPatch as CellFontPatch);
-}
-
-function resolveSetFillPatch(
-  addressOrRowNumber: string | number,
-  columnOrPatch: number | string | CellFillPatch,
-  patch: CellFillPatch | undefined,
-): CellFillPatch {
-  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : (columnOrPatch as CellFillPatch);
-}
-
-function resolveSetBorderPatch(
-  addressOrRowNumber: string | number,
-  columnOrPatch: number | string | CellBorderPatch,
-  patch: CellBorderPatch | undefined,
-): CellBorderPatch {
-  return typeof addressOrRowNumber === "number" ? (patch ?? {}) : (columnOrPatch as CellBorderPatch);
-}
-
-function resolveSetStyleId(
-  addressOrRowNumber: string | number,
-  columnOrStyleId: number | string | null,
-  styleId?: number | null,
-): number | null {
-  const nextStyleId =
-    typeof addressOrRowNumber === "number" ? (styleId ?? null) : (columnOrStyleId as number | null);
-  assertStyleId(nextStyleId);
-  return nextStyleId;
-}
-
 function resolveCopyStyleArguments(
   sourceAddressOrRowNumber: string | number,
   sourceColumnOrTargetAddress: number | string,
@@ -1784,81 +1732,6 @@ function assertInsertCount(count: number): void {
     throw new XlsxError(`Invalid insert count: ${count}`);
   }
 }
-
-const WORKSHEET_REF_TAGS = ["autoFilter", "sortState", "hyperlink"];
-const WORKSHEET_SQREF_TAGS = [
-  "conditionalFormatting",
-  "dataValidation",
-  "selection",
-  "protectedRange",
-  "ignoredError",
-];
-const WORKSHEET_CELL_REF_ATTRIBUTES: Array<[string, string]> = [
-  ["selection", "activeCell"],
-  ["pane", "topLeftCell"],
-];
-const ROW_CLOSE_TAG = "</row>";
-const CELL_CLOSE_TAG = "</c>";
-const SHEET_VIEWS_FOLLOWING_TAGS = [
-  "sheetFormatPr",
-  "cols",
-  "sheetData",
-  "autoFilter",
-  "sortState",
-  "mergeCells",
-  "phoneticPr",
-  "conditionalFormatting",
-  "dataValidations",
-  "hyperlinks",
-  "printOptions",
-  "pageMargins",
-  "pageSetup",
-  "headerFooter",
-  "rowBreaks",
-  "colBreaks",
-  "customProperties",
-  "cellWatches",
-  "ignoredErrors",
-  "smartTags",
-  "drawing",
-  "legacyDrawing",
-  "legacyDrawingHF",
-  "picture",
-  "oleObjects",
-  "controls",
-  "webPublishItems",
-  "tableParts",
-  "extLst",
-];
-const COLS_FOLLOWING_TAGS = [
-  "sheetData",
-  "autoFilter",
-  "sortState",
-  "mergeCells",
-  "phoneticPr",
-  "conditionalFormatting",
-  "dataValidations",
-  "hyperlinks",
-  "printOptions",
-  "pageMargins",
-  "pageSetup",
-  "headerFooter",
-  "rowBreaks",
-  "colBreaks",
-  "customProperties",
-  "cellWatches",
-  "ignoredErrors",
-  "smartTags",
-  "drawing",
-  "legacyDrawing",
-  "legacyDrawingHF",
-  "picture",
-  "oleObjects",
-  "controls",
-  "webPublishItems",
-  "tableParts",
-  "extLst",
-];
 const EMPTY_RELATIONSHIPS_XML =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
   `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
