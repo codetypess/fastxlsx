@@ -1,7 +1,7 @@
-import type { DataValidation, Hyperlink, SetDataValidationOptions } from "./types.js";
-import { XlsxError } from "./errors.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
-import { decodeXmlText, escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "./utils/xml.js";
+import type { DataValidation, Hyperlink, SetDataValidationOptions } from "../types.js";
+import { XlsxError } from "../errors.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
+import { decodeXmlText, escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
 export const HYPERLINK_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";

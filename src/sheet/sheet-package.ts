@@ -1,7 +1,7 @@
-import type { CellValue } from "./types.js";
-import { XlsxError } from "./errors.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
-import { escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "./utils/xml.js";
+import type { CellValue } from "../types.js";
+import { XlsxError } from "../errors.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
+import { escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
 export interface SheetTableReference {
   relationshipId: string;

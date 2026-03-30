@@ -1,7 +1,7 @@
-import { XlsxError } from "./errors.js";
-import type { DefinedName } from "./types.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
-import { decodeXmlText, escapeXmlText, serializeAttributes } from "./utils/xml.js";
+import { XlsxError } from "../errors.js";
+import type { DefinedName } from "../types.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
+import { decodeXmlText, escapeXmlText, serializeAttributes } from "../utils/xml.js";
 
 export function parseDefinedNames(
   workbookXml: string,

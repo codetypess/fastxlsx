@@ -1,6 +1,6 @@
-import { XlsxError } from "./errors.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr } from "./utils/xml-read.js";
-import { escapeXmlText } from "./utils/xml.js";
+import { XlsxError } from "../errors.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
+import { escapeXmlText } from "../utils/xml.js";
 
 export function buildEmptyWorksheetXml(): string {
   return (

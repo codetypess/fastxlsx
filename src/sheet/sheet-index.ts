@@ -1,8 +1,8 @@
-import { XlsxError } from "./errors.js";
-import { parseStringItemText } from "./shared-strings.js";
-import type { CellSnapshot, CellType, CellValue } from "./types.js";
-import type { Workbook } from "./workbook.js";
-import { decodeXmlText } from "./utils/xml.js";
+import { XlsxError } from "../errors.js";
+import { parseStringItemText } from "../workbook/shared-strings.js";
+import type { CellSnapshot, CellType, CellValue } from "../types.js";
+import type { Workbook } from "../workbook.js";
+import { decodeXmlText } from "../utils/xml.js";
 
 export interface LocatedCell {
   address: string;

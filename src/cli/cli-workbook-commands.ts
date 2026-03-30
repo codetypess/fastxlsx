@@ -1,10 +1,10 @@
 import { Command } from "commander";
 
 import { parseJsonCellValue, writeJson } from "./cli-json.js";
-import type { CellValue, DefinedName, SheetVisibility } from "./types.js";
+import type { CellValue, DefinedName, SheetVisibility } from "../types.js";
 import { parsePositiveInteger, resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
-import { Workbook } from "./workbook.js";
+import { Workbook } from "../workbook.js";
 
 interface InspectResult {
   activeSheet: string;

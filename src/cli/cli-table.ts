@@ -10,8 +10,8 @@ import {
   parseJsonDocument,
 } from "./cli-json.js";
 import type { CellRecord } from "./cli-json.js";
-import type { CellValue } from "./types.js";
-import { Workbook } from "./workbook.js";
+import type { CellValue } from "../types.js";
+import { Workbook } from "../workbook.js";
 
 export type CliSheet = ReturnType<Workbook["getSheet"]>;
 

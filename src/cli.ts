@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError } from "commander";
 
-import { formatError } from "./cli-json.js";
-import type { Writer } from "./cli-json.js";
-import { registerApplyCommands } from "./cli-apply-commands.js";
-import { registerRecordCommands } from "./cli-record-commands.js";
-import { CliExitError } from "./cli-shared.js";
-import { registerTableCommands } from "./cli-table-commands.js";
-import { registerValidateCommands } from "./cli-validate-commands.js";
-import { registerWorkbookCommands } from "./cli-workbook-commands.js";
+import { formatError } from "./cli/cli-json.js";
+import type { Writer } from "./cli/cli-json.js";
+import { registerApplyCommands } from "./cli/cli-apply-commands.js";
+import { registerRecordCommands } from "./cli/cli-record-commands.js";
+import { CliExitError } from "./cli/cli-shared.js";
+import { registerTableCommands } from "./cli/cli-table-commands.js";
+import { registerValidateCommands } from "./cli/cli-validate-commands.js";
+import { registerWorkbookCommands } from "./cli/cli-workbook-commands.js";
 
 interface CliIo {
   cwd?: string;

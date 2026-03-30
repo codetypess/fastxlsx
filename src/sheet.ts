@@ -30,7 +30,7 @@ import {
   type LocatedCell,
   type LocatedRow,
   type SheetIndex,
-} from "./sheet-index.js";
+} from "./sheet/sheet-index.js";
 import {
   buildDataValidationXml,
   buildExternalHyperlinkXml,
@@ -47,7 +47,7 @@ import {
   upsertAutoFilterInSheetXml,
   upsertDataValidationInSheetXml,
   upsertHyperlinkInSheetXml,
-} from "./sheet-metadata.js";
+} from "./sheet/sheet-metadata.js";
 import {
   addContentTypeOverride,
   appendRelationship,
@@ -68,14 +68,14 @@ import {
   TABLE_CONTENT_TYPE,
   TABLE_RELATIONSHIP_TYPE,
   upsertRelationship,
-} from "./sheet-package.js";
+} from "./sheet/sheet-package.js";
 import {
   parseSheetFreezePane,
   parseSheetSelection,
   removeFreezePaneFromSheetXml,
   upsertFreezePaneInSheetXml,
   upsertSheetSelectionInSheetXml,
-} from "./sheet-view-metadata.js";
+} from "./sheet/sheet-view-metadata.js";
 import type { Workbook } from "./workbook.js";
 import { basenamePosix, dirnamePosix, resolvePosix, resolveRelationshipTarget } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";

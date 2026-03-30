@@ -32,7 +32,7 @@ import {
   writeStructuredTableRecords,
 } from "./cli-table.js";
 import type { TableCommandContext } from "./cli-table.js";
-import { Workbook } from "./workbook.js";
+import { Workbook } from "../workbook.js";
 
 type ConfigTableSyncMode = "replace" | "upsert";
 

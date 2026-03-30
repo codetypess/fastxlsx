@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { writeJson } from "./cli-json.js";
 import { CliExitError, resolveFrom } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
-import { validateRoundtripFile } from "./roundtrip.js";
+import { validateRoundtripFile } from "../roundtrip.js";
 
 export function registerValidateCommands(program: Command, io: CliCommandIo): void {
   program

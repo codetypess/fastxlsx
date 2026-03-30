@@ -9,7 +9,7 @@ import {
 import type { CellRecord } from "./cli-json.js";
 import { parsePositiveInteger, resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
-import { Workbook } from "./workbook.js";
+import { Workbook } from "../workbook.js";
 
 export function registerRecordCommands(
   program: Command,

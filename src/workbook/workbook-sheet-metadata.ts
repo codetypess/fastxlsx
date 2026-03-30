@@ -1,14 +1,14 @@
-import type { Sheet } from "./sheet.js";
-import { deleteSheetFormulaReferences, renameSheetFormulaReferences } from "./sheet.js";
-import { XlsxError } from "./errors.js";
-import type { SheetVisibility } from "./types.js";
+import type { Sheet } from "../sheet.js";
+import { deleteSheetFormulaReferences, renameSheetFormulaReferences } from "../sheet.js";
+import { XlsxError } from "../errors.js";
+import type { SheetVisibility } from "../types.js";
 import {
   buildDefinedNameTagSource,
   buildDefinedNameTagXml,
   rewriteDefinedNamesInWorkbookXml,
 } from "./workbook-defined-names.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
-import { decodeXmlText, escapeRegex, parseAttributes, serializeAttributes } from "./utils/xml.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
+import { decodeXmlText, escapeRegex, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
 export function getNextSheetId(workbookXml: string): number {
   let nextSheetId = 1;

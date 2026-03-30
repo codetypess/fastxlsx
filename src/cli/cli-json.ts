@@ -1,4 +1,4 @@
-import type { CellValue, SheetVisibility } from "./types.js";
+import type { CellValue, SheetVisibility } from "../types.js";
 
 export type Writer = (chunk: string) => void;
 export type CellRecord = Record<string, CellValue>;

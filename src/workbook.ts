@@ -31,7 +31,7 @@ import {
   renameSheetFormulaReferences,
   shiftFormulaReferences,
 } from "./sheet.js";
-import { parseSharedStrings } from "./shared-strings.js";
+import { parseSharedStrings } from "./workbook/shared-strings.js";
 import {
   buildDefinedNameTagSource,
   buildDefinedNameTagXml,
@@ -40,7 +40,7 @@ import {
   parseDefinedNames,
   removeDefinedNameFromWorkbookXml,
   rewriteDefinedNamesInWorkbookXml,
-} from "./workbook-defined-names.js";
+} from "./workbook/workbook-defined-names.js";
 import {
   getNextRelationshipId,
   getNextSheetId,
@@ -54,17 +54,17 @@ import {
   toRelationshipTarget,
   updateActiveSheetInWorkbookXml,
   updateSheetVisibilityInWorkbookXml,
-} from "./workbook-sheet-metadata.js";
+} from "./workbook/workbook-sheet-metadata.js";
 import {
   buildEmptyWorksheetXml,
   removeContentTypeOverride,
   removeRelationshipById,
   renameHyperlinkLocation,
   updateAppSheetNames,
-} from "./workbook-sheet-package.js";
+} from "./workbook/workbook-sheet-package.js";
 import { Zip } from "./zip.js";
-import type { WorkbookContext } from "./workbook-context.js";
-import { resolveWorkbookContext } from "./workbook-context.js";
+import type { WorkbookContext } from "./workbook/workbook-context.js";
+import { resolveWorkbookContext } from "./workbook/workbook-context.js";
 import { basenamePosix, dirnamePosix } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
 import {

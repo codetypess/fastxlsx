@@ -1,7 +1,7 @@
-import { Sheet } from "./sheet.js";
-import type { Workbook } from "./workbook.js";
-import { basenamePosix, dirnamePosix, resolveRelationshipTarget } from "./utils/path.js";
-import { findXmlTags, getTagAttr } from "./utils/xml-read.js";
+import { Sheet } from "../sheet.js";
+import type { Workbook } from "../workbook.js";
+import { basenamePosix, dirnamePosix, resolveRelationshipTarget } from "../utils/path.js";
+import { findXmlTags, getTagAttr } from "../utils/xml-read.js";
 
 export interface WorkbookContext {
   workbookDir: string;

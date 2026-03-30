@@ -22,8 +22,8 @@ import {
 import type { CellRecord } from "./cli-json.js";
 import { resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
-import type { CellValue, SheetVisibility } from "./types.js";
-import { Workbook } from "./workbook.js";
+import type { CellValue, SheetVisibility } from "../types.js";
+import { Workbook } from "../workbook.js";
 
 type WorkbookOperation =
   | {

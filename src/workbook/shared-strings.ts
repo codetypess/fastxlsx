@@ -1,5 +1,5 @@
-import { findXmlTags } from "./utils/xml-read.js";
-import { decodeXmlText } from "./utils/xml.js";
+import { findXmlTags } from "../utils/xml-read.js";
+import { decodeXmlText } from "../utils/xml.js";
 
 export function parseSharedStrings(xml: string): string[] {
   return findXmlTags(xml, "si")

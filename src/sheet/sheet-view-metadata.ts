@@ -1,7 +1,7 @@
-import type { FreezePane, SheetSelection } from "./types.js";
-import { XlsxError } from "./errors.js";
-import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
-import { escapeRegex, parseAttributes, serializeAttributes } from "./utils/xml.js";
+import type { FreezePane, SheetSelection } from "../types.js";
+import { XlsxError } from "../errors.js";
+import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
+import { escapeRegex, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
 const SHEET_VIEWS_FOLLOWING_TAGS = [
   "sheetFormatPr",
