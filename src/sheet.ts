@@ -30,7 +30,6 @@ import {
   type SheetIndex,
 } from "./sheet/sheet-index.js";
 import {
-  compareRangeRefs,
   formatRangeRef,
   makeCellAddress,
   normalizeCellAddress,
@@ -40,6 +39,7 @@ import {
   parseRangeRef,
   splitCellAddress,
 } from "./sheet/sheet-address.js";
+import { parseMergedRanges, updateMergedRanges } from "./sheet/sheet-merge.js";
 import {
   buildEmptyStyledRowXml,
   buildStyledRowXml,
@@ -48,6 +48,12 @@ import {
   transformColumnStyleDefinitions,
   updateColumnStyleIdInSheetXml,
 } from "./sheet/sheet-style-xml.js";
+import {
+  getSheetRelationshipsPath,
+  listTableReferences,
+  rewriteTableReferenceXml,
+  type TableReference,
+} from "./sheet/sheet-table-xml.js";
 import {
   buildDataValidationXml,
   buildExternalHyperlinkXml,
@@ -111,9 +117,7 @@ import {
   resolveSetFormulaArguments,
 } from "./sheet/sheet-write.js";
 import {
-  buildCountedXmlContainer,
   buildXmlElement,
-  buildSelfClosingXmlElement,
   getXmlTagInnerStart,
   replaceXmlTagSource,
   rewriteXmlTagsByName,
@@ -126,7 +130,7 @@ import {
   upsertSheetSelectionInSheetXml,
 } from "./sheet/sheet-view-metadata.js";
 import type { Workbook } from "./workbook.js";
-import { basenamePosix, dirnamePosix, resolvePosix, resolveRelationshipTarget } from "./utils/path.js";
+import { resolvePosix } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
 import {
   decodeXmlText,
@@ -134,11 +138,6 @@ import {
   escapeXmlText,
   parseAttributes,
 } from "./utils/xml.js";
-
-interface TableReference {
-  relationshipId: string;
-  path: string;
-}
 
 interface UsedRangeBounds {
   minRow: number;
@@ -1518,49 +1517,9 @@ export class Sheet {
   }
 
   private getTableReferences(): TableReference[] {
-    const sheetRelationshipIds = findXmlTags(this.getSheetIndex().xml, "tablePart")
-      .filter((tag) => tag.selfClosing)
-      .map((tag) => getTagAttr(tag, "r:id"))
-      .filter((relationshipId): relationshipId is string => relationshipId !== undefined);
-    if (sheetRelationshipIds.length === 0) {
-      return [];
-    }
-
-    const relationshipsPath = getSheetRelationshipsPath(this.path);
-    if (!this.workbook.listEntries().includes(relationshipsPath)) {
-      return [];
-    }
-
-    const relationshipsXml = this.workbook.readEntryText(relationshipsPath);
-    const baseDir = dirnamePosix(this.path);
-    const tables: TableReference[] = [];
-
-    for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
-      if (!relationshipTag.selfClosing) {
-        continue;
-      }
-
-      const relationshipId = getTagAttr(relationshipTag, "Id");
-      const type = getTagAttr(relationshipTag, "Type");
-      const target = getTagAttr(relationshipTag, "Target");
-
-      if (
-        !relationshipId ||
-        !type ||
-        !target ||
-        !sheetRelationshipIds.includes(relationshipId) ||
-        !/\/table$/.test(type)
-      ) {
-        continue;
-      }
-
-      tables.push({
-        relationshipId,
-        path: resolveRelationshipTarget(baseDir, target),
-      });
-    }
-
-    return tables;
+    return listTableReferences(this.getSheetIndex().xml, this.path, this.workbook.listEntries(), (path) =>
+      this.workbook.readEntryText(path),
+    );
   }
 
   private readSheetRelationshipsXml(): string {
@@ -1662,52 +1621,6 @@ function resolveCellAddress(addressOrRowNumber: string | number, column?: number
   return makeCellAddress(addressOrRowNumber, normalizeColumnNumber(column));
 }
 
-function parseMergedRanges(sheetXml: string): string[] {
-  const mergeCellsTag = findFirstXmlTag(sheetXml, "mergeCells");
-  if (!mergeCellsTag?.innerXml) {
-    return [];
-  }
-
-  return findXmlTags(mergeCellsTag.innerXml, "mergeCell")
-    .filter((tag) => tag.selfClosing)
-    .map((tag) => getTagAttr(tag, "ref"))
-    .filter((ref): ref is string => ref !== undefined)
-    .map((ref) => normalizeRangeRef(ref));
-}
-
-function updateMergedRanges(sheetXml: string, ranges: string[]): string {
-  const normalizedRanges = [...new Set(ranges.map(normalizeRangeRef))].sort(compareRangeRefs);
-  const mergeCellsTag = findFirstXmlTag(sheetXml, "mergeCells");
-
-  if (normalizedRanges.length === 0) {
-    if (!mergeCellsTag) {
-      return sheetXml;
-    }
-
-    return replaceXmlTagSource(sheetXml, mergeCellsTag, "");
-  }
-
-  const mergeCellsXml = buildCountedXmlContainer(
-    "mergeCells",
-    mergeCellsTag?.attributesSource ?? "",
-    "count",
-    normalizedRanges.map((range) => `<mergeCell ref="${range}"/>`),
-  );
-
-  if (mergeCellsTag) {
-    return replaceXmlTagSource(sheetXml, mergeCellsTag, mergeCellsXml);
-  }
-
-  const sheetDataCloseTag = "</sheetData>";
-  const insertionIndex = sheetXml.indexOf(sheetDataCloseTag);
-  if (insertionIndex === -1) {
-    throw new XlsxError("Worksheet is missing </sheetData>");
-  }
-
-  const anchorIndex = insertionIndex + sheetDataCloseTag.length;
-  return sheetXml.slice(0, anchorIndex) + mergeCellsXml + sheetXml.slice(anchorIndex);
-}
-
 function createCellEntry(cell: LocatedCell): CellEntry {
   return {
     address: cell.address,
@@ -1719,61 +1632,6 @@ function createCellEntry(cell: LocatedCell): CellEntry {
 
 function normalizeEmptyRowXml(rowXml: string): string {
   return rowXml.replace(/>\s*<\/row>$/, "></row>");
-}
-
-function rewriteTableReferenceXml(
-  tableXml: string,
-  transformRange: (range: string) => string | null,
-): string | null {
-  const tableTag = findFirstXmlTag(tableXml, "table");
-  if (!tableTag) {
-    return tableXml;
-  }
-
-  const tableAttributes = parseAttributes(tableTag.attributesSource);
-  const refIndex = tableAttributes.findIndex(([name]) => name === "ref");
-  if (refIndex === -1) {
-    return tableXml;
-  }
-
-  const currentRange = tableAttributes[refIndex]?.[1] ?? "";
-  const nextRange = transformRange(currentRange);
-  if (nextRange === null) {
-    return null;
-  }
-
-  const nextTableAttributes = [...tableAttributes];
-  nextTableAttributes[refIndex] = ["ref", nextRange];
-  let nextTableXml = replaceXmlTagSource(
-    tableXml,
-    tableTag,
-    buildXmlElement("table", nextTableAttributes, tableTag.innerXml ?? ""),
-  );
-  const autoFilterTag = findFirstXmlTag(nextTableXml, "autoFilter");
-
-  if (autoFilterTag) {
-    const attributes = parseAttributes(autoFilterTag.attributesSource);
-    const autoFilterRefIndex = attributes.findIndex(([name]) => name === "ref");
-
-    if (autoFilterRefIndex !== -1) {
-      const autoFilterRange = attributes[autoFilterRefIndex]?.[1] ?? "";
-      const nextAutoFilterRange = transformRange(autoFilterRange);
-
-      if (nextAutoFilterRange === null) {
-        nextTableXml = replaceXmlTagSource(nextTableXml, autoFilterTag, "");
-      } else {
-        const nextAttributes = [...attributes];
-        nextAttributes[autoFilterRefIndex] = ["ref", nextAutoFilterRange];
-        nextTableXml = replaceXmlTagSource(nextTableXml, autoFilterTag, buildSelfClosingXmlElement("autoFilter", nextAttributes));
-      }
-    }
-  }
-
-  return nextTableXml;
-}
-
-function getSheetRelationshipsPath(sheetPath: string): string {
-  return `${dirnamePosix(sheetPath)}/_rels/${basenamePosix(sheetPath)}.rels`;
 }
 
 function assertFreezeSplit(columnCount: number, rowCount: number): void {
