@@ -44,6 +44,7 @@ import {
   resolveCopyStyleArguments,
 } from "./sheet/sheet-common.js";
 import { formatUsedRangeBounds, updateDimensionRef } from "./sheet/sheet-dimension.js";
+import { removeSheetHyperlink, setSheetHyperlink } from "./sheet/sheet-hyperlink-ops.js";
 import { parseMergedRanges, updateMergedRanges } from "./sheet/sheet-merge.js";
 import { buildHeaderMap, writeRecordValues } from "./sheet/sheet-records.js";
 import {
@@ -78,20 +79,14 @@ import {
 } from "./sheet/sheet-validation.js";
 import {
   buildDataValidationXml,
-  buildExternalHyperlinkXml,
-  buildInternalHyperlinkXml,
-  getHyperlinkRelationshipId,
-  HYPERLINK_RELATIONSHIP_TYPE,
   parseHyperlinkRelationshipTargets,
   parseSheetAutoFilter,
   parseSheetDataValidations,
   parseSheetHyperlinks,
   removeAutoFilterFromSheetXml,
   removeDataValidationFromSheetXml,
-  removeHyperlinkFromSheetXml,
   upsertAutoFilterInSheetXml,
   upsertDataValidationInSheetXml,
-  upsertHyperlinkInSheetXml,
 } from "./sheet/sheet-metadata.js";
 import {
   addContentTypeOverride,
@@ -111,7 +106,6 @@ import {
   removeTablePartsFromSheetXml,
   TABLE_CONTENT_TYPE,
   TABLE_RELATIONSHIP_TYPE,
-  upsertRelationship,
 } from "./sheet/sheet-package.js";
 import {
   deleteColumnTransform,
@@ -747,55 +741,29 @@ export class Sheet {
       this.setCell(normalizedAddress, options.text);
     }
 
-    const currentRelationshipId = getHyperlinkRelationshipId(this.getSheetIndex().xml, normalizedAddress);
-    let relationshipsXml = this.readSheetRelationshipsXml();
-    let relationshipId: string | null = currentRelationshipId;
-
-    if (target.startsWith("#")) {
-      if (currentRelationshipId) {
-        relationshipsXml = removeRelationshipById(relationshipsXml, currentRelationshipId);
-      }
-
-      this.writeSheetXml(
-        upsertHyperlinkInSheetXml(
-          this.getSheetIndex().xml,
-          buildInternalHyperlinkXml(normalizedAddress, target, options.tooltip),
-          normalizedAddress,
-        ),
-      );
-      this.writeSheetRelationshipsXml(relationshipsXml);
-      return;
-    }
-
-    relationshipId ??= getNextRelationshipIdFromXml(relationshipsXml);
-    relationshipsXml = upsertRelationship(
-      relationshipsXml,
-      relationshipId,
-      HYPERLINK_RELATIONSHIP_TYPE,
+    const nextState = setSheetHyperlink(
+      this.getSheetIndex().xml,
+      this.readSheetRelationshipsXml(),
+      normalizedAddress,
       target,
-      "External",
+      options,
     );
-    this.writeSheetXml(
-      upsertHyperlinkInSheetXml(
-        this.getSheetIndex().xml,
-        buildExternalHyperlinkXml(normalizedAddress, relationshipId, options.tooltip),
-        normalizedAddress,
-      ),
-    );
-    this.writeSheetRelationshipsXml(relationshipsXml);
+    this.writeSheetXml(nextState.sheetXml);
+    this.writeSheetRelationshipsXml(nextState.relationshipsXml);
   }
 
   removeHyperlink(address: string): void {
     const normalizedAddress = normalizeCellAddress(address);
-    const currentRelationshipId = getHyperlinkRelationshipId(this.getSheetIndex().xml, normalizedAddress);
-    const nextSheetXml = removeHyperlinkFromSheetXml(this.getSheetIndex().xml, normalizedAddress);
+    const currentSheetXml = this.getSheetIndex().xml;
+    const currentRelationshipsXml = this.readSheetRelationshipsXml();
+    const nextState = removeSheetHyperlink(currentSheetXml, currentRelationshipsXml, normalizedAddress);
 
-    if (nextSheetXml !== this.getSheetIndex().xml) {
-      this.writeSheetXml(nextSheetXml);
+    if (nextState.sheetXml !== currentSheetXml) {
+      this.writeSheetXml(nextState.sheetXml);
     }
 
-    if (currentRelationshipId) {
-      this.writeSheetRelationshipsXml(removeRelationshipById(this.readSheetRelationshipsXml(), currentRelationshipId));
+    if (nextState.relationshipsXml !== currentRelationshipsXml) {
+      this.writeSheetRelationshipsXml(nextState.relationshipsXml);
     }
   }
 
