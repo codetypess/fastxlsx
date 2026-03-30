@@ -32,6 +32,23 @@ import {
   type SheetIndex,
 } from "./sheet-index.js";
 import {
+  buildDataValidationXml,
+  buildExternalHyperlinkXml,
+  buildInternalHyperlinkXml,
+  getHyperlinkRelationshipId,
+  HYPERLINK_RELATIONSHIP_TYPE,
+  parseHyperlinkRelationshipTargets,
+  parseSheetAutoFilter,
+  parseSheetDataValidations,
+  parseSheetHyperlinks,
+  removeAutoFilterFromSheetXml,
+  removeDataValidationFromSheetXml,
+  removeHyperlinkFromSheetXml,
+  upsertAutoFilterInSheetXml,
+  upsertDataValidationInSheetXml,
+  upsertHyperlinkInSheetXml,
+} from "./sheet-metadata.js";
+import {
   parseSheetFreezePane,
   parseSheetSelection,
   removeFreezePaneFromSheetXml,
@@ -3444,16 +3461,6 @@ function removeTablePartsFromSheetXml(sheetXml: string, relationshipIds: string[
   return replaceXmlTagSource(sheetXml, tablePartsTag, nextTablePartsXml);
 }
 
-function parseSheetAutoFilter(sheetXml: string): string | null {
-  const autoFilterTag = findFirstXmlTag(sheetXml, "autoFilter");
-  if (!autoFilterTag) {
-    return null;
-  }
-
-  const ref = getTagAttr(autoFilterTag, "ref");
-  return ref ? normalizeRangeRef(ref) : null;
-}
-
 function getXmlTagInnerStart(tag: XmlTag): number {
   if (tag.innerXml === null) {
     return tag.end;
@@ -3522,313 +3529,6 @@ function buildXmlElement(tagName: string, attributes: Array<[string, string]>, i
 function buildSelfClosingXmlElement(tagName: string, attributes: Array<[string, string]>): string {
   const serializedAttributes = serializeAttributes(attributes);
   return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
-}
-
-function upsertAutoFilterInSheetXml(sheetXml: string, range: string): string {
-  const normalizedRange = normalizeRangeRef(range);
-  const autoFilterXml = `<autoFilter ref="${normalizedRange}"/>`;
-  const autoFilterTag = findFirstXmlTag(sheetXml, "autoFilter");
-
-  if (autoFilterTag) {
-    return replaceXmlTagSource(sheetXml, autoFilterTag, autoFilterXml);
-  }
-
-  const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, AUTO_FILTER_FOLLOWING_TAGS);
-  return sheetXml.slice(0, insertionIndex) + autoFilterXml + sheetXml.slice(insertionIndex);
-}
-
-function removeAutoFilterFromSheetXml(sheetXml: string): string {
-  let nextSheetXml = sheetXml;
-
-  const autoFilterTag = findFirstXmlTag(nextSheetXml, "autoFilter");
-  if (autoFilterTag) {
-    nextSheetXml = replaceXmlTagSource(nextSheetXml, autoFilterTag, "");
-  }
-
-  const sortStateTag = findFirstXmlTag(nextSheetXml, "sortState");
-  if (sortStateTag) {
-    nextSheetXml = replaceXmlTagSource(nextSheetXml, sortStateTag, "");
-  }
-
-  return nextSheetXml;
-}
-
-function parseSheetDataValidations(sheetXml: string): DataValidation[] {
-  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
-  if (!dataValidationsTag || dataValidationsTag.innerXml === null) {
-    return [];
-  }
-
-  return parseDataValidationEntries(dataValidationsTag.innerXml)
-    .map((validationTag) => {
-      const sqref = getTagAttr(validationTag, "sqref");
-      if (!sqref) {
-        return null;
-      }
-
-      const errorTitle = getTagAttr(validationTag, "errorTitle");
-      const error = getTagAttr(validationTag, "error");
-      const promptTitle = getTagAttr(validationTag, "promptTitle");
-      const prompt = getTagAttr(validationTag, "prompt");
-      const formula1 = findFirstXmlTag(validationTag.innerXml ?? "", "formula1")?.innerXml;
-      const formula2 = findFirstXmlTag(validationTag.innerXml ?? "", "formula2")?.innerXml;
-
-      return {
-        range: normalizeSqref(sqref),
-        type: getTagAttr(validationTag, "type") ?? null,
-        operator: getTagAttr(validationTag, "operator") ?? null,
-        allowBlank: parseOptionalXmlBoolean(getTagAttr(validationTag, "allowBlank")),
-        showInputMessage: parseOptionalXmlBoolean(getTagAttr(validationTag, "showInputMessage")),
-        showErrorMessage: parseOptionalXmlBoolean(getTagAttr(validationTag, "showErrorMessage")),
-        showDropDown: parseOptionalXmlBoolean(getTagAttr(validationTag, "showDropDown")),
-        errorStyle: getTagAttr(validationTag, "errorStyle") ?? null,
-        errorTitle: errorTitle ? decodeXmlText(errorTitle) : null,
-        error: error ? decodeXmlText(error) : null,
-        promptTitle: promptTitle ? decodeXmlText(promptTitle) : null,
-        prompt: prompt ? decodeXmlText(prompt) : null,
-        imeMode: getTagAttr(validationTag, "imeMode") ?? null,
-        formula1: formula1 ? decodeXmlText(formula1) : null,
-        formula2: formula2 ? decodeXmlText(formula2) : null,
-      };
-    })
-    .filter((validation): validation is DataValidation => validation !== null);
-}
-
-function parseDataValidationEntries(innerXml: string): XmlTag[] {
-  return findXmlTags(innerXml, "dataValidation");
-}
-
-function buildDataValidationXml(range: string, options: SetDataValidationOptions): string {
-  const attributes: Array<[string, string]> = [["sqref", normalizeSqref(range)]];
-  appendOptionalAttribute(attributes, "type", options.type);
-  appendOptionalAttribute(attributes, "operator", options.operator);
-  appendOptionalBooleanAttribute(attributes, "allowBlank", options.allowBlank);
-  appendOptionalBooleanAttribute(attributes, "showInputMessage", options.showInputMessage);
-  appendOptionalBooleanAttribute(attributes, "showErrorMessage", options.showErrorMessage);
-  appendOptionalBooleanAttribute(attributes, "showDropDown", options.showDropDown);
-  appendOptionalAttribute(attributes, "errorStyle", options.errorStyle);
-  appendOptionalAttribute(attributes, "errorTitle", options.errorTitle);
-  appendOptionalAttribute(attributes, "error", options.error);
-  appendOptionalAttribute(attributes, "promptTitle", options.promptTitle);
-  appendOptionalAttribute(attributes, "prompt", options.prompt);
-  appendOptionalAttribute(attributes, "imeMode", options.imeMode);
-
-  const formulas: string[] = [];
-  if (options.formula1 !== undefined) {
-    formulas.push(`<formula1>${escapeXmlText(options.formula1)}</formula1>`);
-  }
-  if (options.formula2 !== undefined) {
-    formulas.push(`<formula2>${escapeXmlText(options.formula2)}</formula2>`);
-  }
-
-  return formulas.length === 0
-    ? `<dataValidation ${serializeAttributes(attributes)}/>`
-    : `<dataValidation ${serializeAttributes(attributes)}>${formulas.join("")}</dataValidation>`;
-}
-
-function upsertDataValidationInSheetXml(sheetXml: string, dataValidationXml: string, range: string): string {
-  const normalizedRange = normalizeSqref(range);
-  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
-  const dataValidations = ((dataValidationsTag?.innerXml ?? "")
-    ? parseDataValidationEntries(dataValidationsTag?.innerXml ?? "").map((validationTag) => ({
-        range: normalizeSqref(getTagAttr(validationTag, "sqref") ?? ""),
-        xml: validationTag.source,
-      }))
-    : []
-  ).filter((validation) => validation.range !== normalizedRange);
-
-  dataValidations.push({ range: normalizedRange, xml: dataValidationXml });
-  const nextDataValidationsXml = buildCountedXmlContainer(
-    "dataValidations",
-    dataValidationsTag?.attributesSource ?? "",
-    "count",
-    dataValidations.map((validation) => validation.xml),
-  );
-
-  if (dataValidationsTag) {
-    return replaceXmlTagSource(sheetXml, dataValidationsTag, nextDataValidationsXml);
-  }
-
-  const insertionIndex = findWorksheetChildInsertionIndex(sheetXml, DATA_VALIDATIONS_FOLLOWING_TAGS);
-  return sheetXml.slice(0, insertionIndex) + nextDataValidationsXml + sheetXml.slice(insertionIndex);
-}
-
-function removeDataValidationFromSheetXml(sheetXml: string, range: string): string {
-  const normalizedRange = normalizeSqref(range);
-  const dataValidationsTag = findFirstXmlTag(sheetXml, "dataValidations");
-  if (!dataValidationsTag || dataValidationsTag.innerXml === null) {
-    return sheetXml;
-  }
-
-  const keptDataValidations = parseDataValidationEntries(dataValidationsTag.innerXml).filter(
-    (validationTag) => normalizeSqref(getTagAttr(validationTag, "sqref") ?? "") !== normalizedRange,
-  );
-
-  const nextDataValidationsXml =
-    keptDataValidations.length === 0
-      ? ""
-      : buildCountedXmlContainer(
-          "dataValidations",
-          dataValidationsTag.attributesSource,
-          "count",
-          keptDataValidations.map((validationTag) => validationTag.source),
-        );
-
-  return replaceXmlTagSource(sheetXml, dataValidationsTag, nextDataValidationsXml);
-}
-
-function parseSheetHyperlinks(
-  sheetXml: string,
-  relationshipTargets: Map<string, string>,
-): Hyperlink[] {
-  return findXmlTags(sheetXml, "hyperlink").map((tag) => {
-    const address = getTagAttr(tag, "ref");
-    const relationshipId = getTagAttr(tag, "r:id");
-    const location = getTagAttr(tag, "location");
-    const tooltip = getTagAttr(tag, "tooltip") ?? null;
-
-    if (!address) {
-      return null;
-    }
-
-    if (relationshipId) {
-      const target = relationshipTargets.get(relationshipId);
-      if (!target) {
-        return null;
-      }
-
-      return {
-        address: normalizeCellAddress(address),
-        target,
-        tooltip,
-        type: "external" as const,
-      };
-    }
-
-    if (!location) {
-      return null;
-    }
-
-    return {
-      address: normalizeCellAddress(address),
-      target: location,
-      tooltip,
-      type: "internal" as const,
-    };
-  }).filter((hyperlink): hyperlink is Hyperlink => hyperlink !== null);
-}
-
-function parseHyperlinkRelationshipTargets(relationshipsXml: string): Map<string, string> {
-  const targets = new Map<string, string>();
-
-  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
-    if (!relationshipTag.selfClosing) {
-      continue;
-    }
-
-    const relationshipId = getTagAttr(relationshipTag, "Id");
-    const type = getTagAttr(relationshipTag, "Type");
-    const target = getTagAttr(relationshipTag, "Target");
-
-    if (!relationshipId || !type || !target || type !== HYPERLINK_RELATIONSHIP_TYPE) {
-      continue;
-    }
-
-    targets.set(relationshipId, decodeXmlText(target));
-  }
-
-  return targets;
-}
-
-function getHyperlinkRelationshipId(sheetXml: string, address: string): string | null {
-  const normalizedAddress = normalizeCellAddress(address);
-
-  for (const hyperlinkTag of findXmlTags(sheetXml, "hyperlink")) {
-    const ref = getTagAttr(hyperlinkTag, "ref");
-    if (!ref || normalizeCellAddress(ref) !== normalizedAddress) {
-      continue;
-    }
-
-    return getTagAttr(hyperlinkTag, "r:id") ?? null;
-  }
-
-  return null;
-}
-
-function buildInternalHyperlinkXml(address: string, location: string, tooltip?: string): string {
-  const attributes: Array<[string, string]> = [["ref", address], ["location", location]];
-  if (tooltip) {
-    attributes.push(["tooltip", tooltip]);
-  }
-
-  return `<hyperlink ${serializeAttributes(attributes)}/>`;
-}
-
-function buildExternalHyperlinkXml(address: string, relationshipId: string, tooltip?: string): string {
-  const attributes: Array<[string, string]> = [["ref", address], ["r:id", relationshipId]];
-  if (tooltip) {
-    attributes.push(["tooltip", tooltip]);
-  }
-
-  return `<hyperlink ${serializeAttributes(attributes)}/>`;
-}
-
-function upsertHyperlinkInSheetXml(sheetXml: string, hyperlinkXml: string, address: string): string {
-  const normalizedAddress = normalizeCellAddress(address);
-  const hyperlinksTag = findFirstXmlTag(sheetXml, "hyperlinks");
-  const hyperlinksInnerXml = hyperlinksTag?.innerXml ?? "";
-
-  const hyperlinks = (hyperlinksInnerXml
-    ? findXmlTags(hyperlinksInnerXml, "hyperlink").map((tag) => {
-        const ref = getTagAttr(tag, "ref");
-        return {
-          address: ref ? normalizeCellAddress(ref) : "",
-          xml: tag.source,
-        };
-      })
-    : []
-  ).filter((hyperlink) => hyperlink.address !== normalizedAddress);
-  hyperlinks.push({ address: normalizedAddress, xml: hyperlinkXml });
-  hyperlinks.sort((left, right) => compareCellAddresses(left.address, right.address));
-
-  const nextHyperlinksXml = `<hyperlinks>${hyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
-
-  if (hyperlinksTag) {
-    return replaceXmlTagSource(sheetXml, hyperlinksTag, nextHyperlinksXml);
-  }
-
-  const closingTag = "</worksheet>";
-  const insertionIndex = sheetXml.indexOf(closingTag);
-  if (insertionIndex === -1) {
-    throw new XlsxError("Worksheet is missing </worksheet>");
-  }
-
-  return sheetXml.slice(0, insertionIndex) + nextHyperlinksXml + sheetXml.slice(insertionIndex);
-}
-
-function removeHyperlinkFromSheetXml(sheetXml: string, address: string): string {
-  const normalizedAddress = normalizeCellAddress(address);
-  const hyperlinksTag = findFirstXmlTag(sheetXml, "hyperlinks");
-  if (!hyperlinksTag) {
-    return sheetXml;
-  }
-
-  const keptHyperlinks = findXmlTags(hyperlinksTag.innerXml ?? "", "hyperlink")
-    .map((tag) => {
-      const ref = getTagAttr(tag, "ref");
-      return {
-        address: ref ? normalizeCellAddress(ref) : "",
-        xml: tag.source,
-      };
-    })
-    .filter((hyperlink) => hyperlink.address !== normalizedAddress);
-
-  const nextHyperlinksXml =
-    keptHyperlinks.length === 0
-      ? ""
-      : `<hyperlinks>${keptHyperlinks.map((hyperlink) => hyperlink.xml).join("")}</hyperlinks>`;
-
-  return replaceXmlTagSource(sheetXml, hyperlinksTag, nextHyperlinksXml);
 }
 
 function getSheetRelationshipsPath(sheetPath: string): string {
@@ -4079,26 +3779,6 @@ function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: s
   return closingTagIndex;
 }
 
-function appendOptionalAttribute(attributes: Array<[string, string]>, name: string, value: string | undefined): void {
-  if (value !== undefined) {
-    attributes.push([name, value]);
-  }
-}
-
-function appendOptionalBooleanAttribute(attributes: Array<[string, string]>, name: string, value: boolean | undefined): void {
-  if (value !== undefined) {
-    attributes.push([name, value ? "1" : "0"]);
-  }
-}
-
-function parseOptionalXmlBoolean(value: string | undefined): boolean | null {
-  if (value === undefined) {
-    return null;
-  }
-
-  return value === "1" || value.toLowerCase() === "true";
-}
-
 function addContentTypeOverride(contentTypesXml: string, partPath: string, contentType: string): string {
   if (new RegExp(`PartName\\s*=\\s*["']/${escapeRegex(partPath)}["']`).test(contentTypesXml)) {
     return contentTypesXml;
@@ -4241,12 +3921,6 @@ function compareRangeRefs(left: string, right: string): number {
   );
 }
 
-function compareCellAddresses(left: string, right: string): number {
-  const leftCell = splitCellAddress(left);
-  const rightCell = splitCellAddress(right);
-  return leftCell.rowNumber - rightCell.rowNumber || leftCell.columnNumber - rightCell.columnNumber;
-}
-
 function updateDimensionRef(sheetIndex: SheetIndex): string {
   const usedRange = formatUsedRangeBounds(sheetIndex.usedBounds);
   const dimensionTag = findFirstXmlTag(sheetIndex.xml, "dimension");
@@ -4310,37 +3984,8 @@ const WORKSHEET_CELL_REF_ATTRIBUTES: Array<[string, string]> = [
 ];
 const TABLE_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
-const HYPERLINK_RELATIONSHIP_TYPE =
-  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 const ROW_CLOSE_TAG = "</row>";
 const CELL_CLOSE_TAG = "</c>";
-const AUTO_FILTER_FOLLOWING_TAGS = [
-  "sortState",
-  "mergeCells",
-  "phoneticPr",
-  "conditionalFormatting",
-  "dataValidations",
-  "hyperlinks",
-  "printOptions",
-  "pageMargins",
-  "pageSetup",
-  "headerFooter",
-  "rowBreaks",
-  "colBreaks",
-  "customProperties",
-  "cellWatches",
-  "ignoredErrors",
-  "smartTags",
-  "drawing",
-  "legacyDrawing",
-  "legacyDrawingHF",
-  "picture",
-  "oleObjects",
-  "controls",
-  "webPublishItems",
-  "tableParts",
-  "extLst",
-];
 const SHEET_VIEWS_FOLLOWING_TAGS = [
   "sheetFormatPr",
   "cols",
@@ -4380,28 +4025,6 @@ const COLS_FOLLOWING_TAGS = [
   "phoneticPr",
   "conditionalFormatting",
   "dataValidations",
-  "hyperlinks",
-  "printOptions",
-  "pageMargins",
-  "pageSetup",
-  "headerFooter",
-  "rowBreaks",
-  "colBreaks",
-  "customProperties",
-  "cellWatches",
-  "ignoredErrors",
-  "smartTags",
-  "drawing",
-  "legacyDrawing",
-  "legacyDrawingHF",
-  "picture",
-  "oleObjects",
-  "controls",
-  "webPublishItems",
-  "tableParts",
-  "extLst",
-];
-const DATA_VALIDATIONS_FOLLOWING_TAGS = [
   "hyperlinks",
   "printOptions",
   "pageMargins",
