@@ -3,6 +3,11 @@ import { XlsxError } from "../errors.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
 import { escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 import {
+  compareCellAddresses,
+  normalizeRangeRef,
+  parseRangeRef,
+} from "./sheet-address.js";
+import {
   buildCountedXmlContainer,
   findWorksheetChildInsertionIndex,
   replaceXmlTagSource,
@@ -345,100 +350,4 @@ function buildRelationshipXml(
   }
 
   return `<Relationship ${serializeAttributes(attributes)}/>`;
-}
-
-function normalizeRangeRef(range: string): string {
-  const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
-  return formatRangeRef(startRow, startColumn, endRow, endColumn);
-}
-
-function parseRangeRef(range: string): {
-  startRow: number;
-  endRow: number;
-  startColumn: number;
-  endColumn: number;
-} {
-  const normalizedRange = range.toUpperCase();
-  const [startAddress, endAddress = normalizedRange] = normalizedRange.split(":");
-
-  if (!startAddress || !endAddress) {
-    throw new XlsxError(`Invalid range reference: ${range}`);
-  }
-
-  const start = splitCellAddress(startAddress);
-  const end = splitCellAddress(endAddress);
-
-  return {
-    startRow: Math.min(start.rowNumber, end.rowNumber),
-    endRow: Math.max(start.rowNumber, end.rowNumber),
-    startColumn: Math.min(start.columnNumber, end.columnNumber),
-    endColumn: Math.max(start.columnNumber, end.columnNumber),
-  };
-}
-
-function splitCellAddress(address: string): { rowNumber: number; columnNumber: number } {
-  assertCellAddress(address);
-  const match = address.toUpperCase().match(/^([A-Z]+)([1-9]\d*)$/);
-  if (!match) {
-    throw new XlsxError(`Invalid cell address: ${address}`);
-  }
-
-  return {
-    columnNumber: columnLabelToNumber(match[1]),
-    rowNumber: Number(match[2]),
-  };
-}
-
-function assertCellAddress(address: string): void {
-  if (!/^[A-Z]+[1-9]\d*$/i.test(address)) {
-    throw new XlsxError(`Invalid cell address: ${address}`);
-  }
-}
-
-function formatRangeRef(
-  startRow: number,
-  startColumn: number,
-  endRow: number,
-  endColumn: number,
-): string {
-  const startAddress = makeCellAddress(startRow, startColumn);
-  const endAddress = makeCellAddress(endRow, endColumn);
-  return startAddress === endAddress ? startAddress : `${startAddress}:${endAddress}`;
-}
-
-function makeCellAddress(rowNumber: number, columnNumber: number): string {
-  return `${numberToColumnLabel(columnNumber)}${rowNumber}`;
-}
-
-function compareCellAddresses(left: string, right: string): number {
-  const leftCell = splitCellAddress(left);
-  const rightCell = splitCellAddress(right);
-  return leftCell.rowNumber - rightCell.rowNumber || leftCell.columnNumber - rightCell.columnNumber;
-}
-
-function columnLabelToNumber(label: string): number {
-  let value = 0;
-
-  for (const character of label) {
-    value = value * 26 + (character.charCodeAt(0) - 64);
-  }
-
-  return value;
-}
-
-function numberToColumnLabel(columnNumber: number): string {
-  if (!Number.isInteger(columnNumber) || columnNumber < 1) {
-    throw new XlsxError(`Invalid column number: ${columnNumber}`);
-  }
-
-  let remaining = columnNumber;
-  let label = "";
-
-  while (remaining > 0) {
-    const offset = (remaining - 1) % 26;
-    label = String.fromCharCode(65 + offset) + label;
-    remaining = Math.floor((remaining - 1) / 26);
-  }
-
-  return label;
 }

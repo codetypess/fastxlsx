@@ -1,5 +1,13 @@
 import { XlsxError } from "../errors.js";
-import { parseCellAddressFast, type LocatedCell, type LocatedRow } from "./sheet-index.js";
+import type { LocatedCell, LocatedRow } from "./sheet-index.js";
+import {
+  columnLabelToNumber,
+  formatRangeRef,
+  makeCellAddress,
+  numberToColumnLabel,
+  parseRangeRef,
+  splitCellAddress,
+} from "./sheet-address.js";
 import { buildXmlElement, rewriteXmlTagsByName } from "./sheet-xml.js";
 import { decodeXmlText, escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
@@ -1105,74 +1113,4 @@ function formatSheetReference(sheetName: string): string {
   }
 
   return `'${sheetName.replaceAll("'", "''")}'`;
-}
-
-function splitCellAddress(address: string): { rowNumber: number; columnNumber: number } {
-  return parseCellAddressFast(address);
-}
-
-function columnLabelToNumber(label: string): number {
-  let value = 0;
-
-  for (const character of label.toUpperCase()) {
-    value = value * 26 + (character.charCodeAt(0) - 64);
-  }
-
-  return value;
-}
-
-function makeCellAddress(rowNumber: number, columnNumber: number): string {
-  return `${numberToColumnLabel(columnNumber)}${rowNumber}`;
-}
-
-function formatRangeRef(
-  startRow: number,
-  startColumn: number,
-  endRow: number,
-  endColumn: number,
-): string {
-  const startAddress = makeCellAddress(startRow, startColumn);
-  const endAddress = makeCellAddress(endRow, endColumn);
-  return startAddress === endAddress ? startAddress : `${startAddress}:${endAddress}`;
-}
-
-function parseRangeRef(range: string): {
-  startRow: number;
-  endRow: number;
-  startColumn: number;
-  endColumn: number;
-} {
-  const normalizedRange = range.toUpperCase();
-  const [startAddress, endAddress = normalizedRange] = normalizedRange.split(":");
-
-  if (!startAddress || !endAddress) {
-    throw new XlsxError(`Invalid range reference: ${range}`);
-  }
-
-  const start = splitCellAddress(startAddress);
-  const end = splitCellAddress(endAddress);
-
-  return {
-    startRow: Math.min(start.rowNumber, end.rowNumber),
-    endRow: Math.max(start.rowNumber, end.rowNumber),
-    startColumn: Math.min(start.columnNumber, end.columnNumber),
-    endColumn: Math.max(start.columnNumber, end.columnNumber),
-  };
-}
-
-function numberToColumnLabel(columnNumber: number): string {
-  if (!Number.isInteger(columnNumber) || columnNumber < 1) {
-    throw new XlsxError(`Invalid column number: ${columnNumber}`);
-  }
-
-  let remaining = columnNumber;
-  let label = "";
-
-  while (remaining > 0) {
-    const offset = (remaining - 1) % 26;
-    label = String.fromCharCode(65 + offset) + label;
-    remaining = Math.floor((remaining - 1) / 26);
-  }
-
-  return label;
 }
