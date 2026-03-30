@@ -1,7 +1,12 @@
 import type { DataValidation, Hyperlink, SetDataValidationOptions } from "../types.js";
 import { XlsxError } from "../errors.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
-import { decodeXmlText, escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
+import { decodeXmlText, escapeXmlText, serializeAttributes } from "../utils/xml.js";
+import {
+  buildCountedXmlContainer,
+  findWorksheetChildInsertionIndex,
+  replaceXmlTagSource,
+} from "./sheet-xml.js";
 
 export const HYPERLINK_RELATIONSHIP_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
@@ -370,59 +375,8 @@ export function removeHyperlinkFromSheetXml(sheetXml: string, address: string): 
   return replaceXmlTagSource(sheetXml, hyperlinksTag, nextHyperlinksXml);
 }
 
-function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
-  return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
-}
-
-function buildCountedXmlContainer(
-  tagName: string,
-  attributesSource: string,
-  countAttributeName: string,
-  childXml: string[],
-): string {
-  const attributes = parseAttributes(attributesSource);
-  const nextAttributes = [...attributes];
-  const countIndex = nextAttributes.findIndex(([name]) => name === countAttributeName);
-
-  if (countIndex === -1) {
-    nextAttributes.push([countAttributeName, String(childXml.length)]);
-  } else {
-    nextAttributes[countIndex] = [countAttributeName, String(childXml.length)];
-  }
-
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
-}
-
 function parseDataValidationEntries(innerXml: string): XmlTag[] {
   return findXmlTags(innerXml, "dataValidation");
-}
-
-function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: string[]): number {
-  let insertionIndex = -1;
-
-  for (const tagName of followingTagNames) {
-    const match = sheetXml.match(new RegExp(`<${escapeRegex(tagName)}\\b`));
-    if (!match || match.index === undefined) {
-      continue;
-    }
-
-    if (insertionIndex === -1 || match.index < insertionIndex) {
-      insertionIndex = match.index;
-    }
-  }
-
-  if (insertionIndex !== -1) {
-    return insertionIndex;
-  }
-
-  const closingTag = "</worksheet>";
-  const closingTagIndex = sheetXml.indexOf(closingTag);
-  if (closingTagIndex === -1) {
-    throw new XlsxError("Worksheet is missing </worksheet>");
-  }
-
-  return closingTagIndex;
 }
 
 function appendOptionalAttribute(attributes: Array<[string, string]>, name: string, value: string | undefined): void {

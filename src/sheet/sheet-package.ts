@@ -2,6 +2,11 @@ import type { CellValue } from "../types.js";
 import { XlsxError } from "../errors.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
 import { escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
+import {
+  buildCountedXmlContainer,
+  findWorksheetChildInsertionIndex,
+  replaceXmlTagSource,
+} from "./sheet-xml.js";
 
 export interface SheetTableReference {
   relationshipId: string;
@@ -340,62 +345,6 @@ function buildRelationshipXml(
   }
 
   return `<Relationship ${serializeAttributes(attributes)}/>`;
-}
-
-function buildCountedXmlContainer(
-  tagName: string,
-  attributesSource: string,
-  countAttributeName: string,
-  childXml: string[],
-): string {
-  const attributes = parseAttributes(attributesSource);
-  const nextAttributes = [...attributes];
-  const countIndex = nextAttributes.findIndex(([name]) => name === countAttributeName);
-
-  if (countIndex === -1) {
-    nextAttributes.push([countAttributeName, String(childXml.length)]);
-  } else {
-    nextAttributes[countIndex] = [countAttributeName, String(childXml.length)];
-  }
-
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
-}
-
-export function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: string[]): number {
-  let insertionIndex = -1;
-
-  for (const tagName of followingTagNames) {
-    const match = sheetXml.match(new RegExp(`<${escapeRegex(tagName)}\\b`));
-    if (!match || match.index === undefined) {
-      continue;
-    }
-
-    if (insertionIndex === -1 || match.index < insertionIndex) {
-      insertionIndex = match.index;
-    }
-  }
-
-  if (insertionIndex !== -1) {
-    return insertionIndex;
-  }
-
-  const closingTag = "</worksheet>";
-  const closingTagIndex = sheetXml.indexOf(closingTag);
-  if (closingTagIndex === -1) {
-    throw new XlsxError("Worksheet is missing </worksheet>");
-  }
-
-  return closingTagIndex;
-}
-
-function replaceXmlTagSource(xml: string, source: string, nextSource: string): string {
-  const index = xml.indexOf(source);
-  if (index === -1) {
-    return xml;
-  }
-
-  return xml.slice(0, index) + nextSource + xml.slice(index + source.length);
 }
 
 function normalizeRangeRef(range: string): string {

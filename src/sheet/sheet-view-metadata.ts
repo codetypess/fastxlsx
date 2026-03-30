@@ -1,7 +1,13 @@
 import type { FreezePane, SheetSelection } from "../types.js";
 import { XlsxError } from "../errors.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "../utils/xml-read.js";
-import { escapeRegex, parseAttributes, serializeAttributes } from "../utils/xml.js";
+import { parseAttributes, serializeAttributes } from "../utils/xml.js";
+import {
+  findWorksheetChildInsertionIndex,
+  removeXmlTagsFromInnerXml,
+  replaceNestedXmlTagSource,
+  replaceXmlTagSource,
+} from "./sheet-xml.js";
 
 const SHEET_VIEWS_FOLLOWING_TAGS = [
   "sheetFormatPr",
@@ -220,36 +226,6 @@ export function upsertSheetSelectionInSheetXml(
   return replaceNestedXmlTagSource(sheetXml, sheetViewsTag, sheetViewTag, nextSheetViewXml);
 }
 
-function getXmlTagInnerStart(tag: XmlTag): number {
-  if (tag.innerXml === null) {
-    return tag.end;
-  }
-
-  return tag.end - tag.innerXml.length - `</${tag.tagName}>`.length;
-}
-
-function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
-  return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
-}
-
-function replaceNestedXmlTagSource(xml: string, parentTag: XmlTag, childTag: XmlTag, nextSource: string): string {
-  const parentInnerStart = getXmlTagInnerStart(parentTag);
-  return (
-    xml.slice(0, parentInnerStart + childTag.start) +
-    nextSource +
-    xml.slice(parentInnerStart + childTag.end)
-  );
-}
-
-function removeXmlTagsFromInnerXml(innerXml: string, tags: XmlTag[]): string {
-  return [...tags]
-    .sort((left, right) => right.start - left.start)
-    .reduce(
-      (currentXml, tag) => currentXml.slice(0, tag.start) + currentXml.slice(tag.end),
-      innerXml,
-    );
-}
-
 function getSheetViewTags(sheetXml: string): {
   sheetViewTag: XmlTag | null;
   sheetViewsTag: XmlTag | null;
@@ -265,33 +241,6 @@ function ensureXmlAttribute(attributes: Array<[string, string]>, name: string, v
   if (!attributes.some(([candidateName]) => candidateName === name)) {
     attributes.push([name, value]);
   }
-}
-
-function findWorksheetChildInsertionIndex(sheetXml: string, followingTagNames: string[]): number {
-  let insertionIndex = -1;
-
-  for (const tagName of followingTagNames) {
-    const match = sheetXml.match(new RegExp(`<${escapeRegex(tagName)}\\b`));
-    if (!match || match.index === undefined) {
-      continue;
-    }
-
-    if (insertionIndex === -1 || match.index < insertionIndex) {
-      insertionIndex = match.index;
-    }
-  }
-
-  if (insertionIndex !== -1) {
-    return insertionIndex;
-  }
-
-  const closingTag = "</worksheet>";
-  const closingTagIndex = sheetXml.indexOf(closingTag);
-  if (closingTagIndex === -1) {
-    throw new XlsxError("Worksheet is missing </worksheet>");
-  }
-
-  return closingTagIndex;
 }
 
 function buildFreezePaneXml(columnCount: number, rowCount: number): string {

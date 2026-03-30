@@ -55,7 +55,6 @@ import {
   assertTableName,
   buildTableXml,
   findSheetTableReferenceByName,
-  findWorksheetChildInsertionIndex,
   getNextRelationshipIdFromXml,
   getNextTableId,
   getNextTableName,
@@ -69,6 +68,16 @@ import {
   TABLE_RELATIONSHIP_TYPE,
   upsertRelationship,
 } from "./sheet/sheet-package.js";
+import {
+  buildCountedXmlContainer,
+  buildXmlContainer,
+  buildXmlElement,
+  buildSelfClosingXmlElement,
+  findWorksheetChildInsertionIndex,
+  getXmlTagInnerStart,
+  replaceXmlTagSource,
+  rewriteXmlTagsByName,
+} from "./sheet/sheet-xml.js";
 import {
   parseSheetFreezePane,
   parseSheetSelection,
@@ -3430,76 +3439,6 @@ function rewriteTableReferenceXml(
   }
 
   return nextTableXml;
-}
-
-function getXmlTagInnerStart(tag: XmlTag): number {
-  if (tag.innerXml === null) {
-    return tag.end;
-  }
-
-  return tag.end - tag.innerXml.length - `</${tag.tagName}>`.length;
-}
-
-function replaceXmlTagSource(xml: string, tag: XmlTag, nextSource: string): string {
-  return xml.slice(0, tag.start) + nextSource + xml.slice(tag.end);
-}
-
-function rewriteXmlTagsByName(
-  xml: string,
-  tagName: string,
-  rewriteTag: (tag: XmlTag) => string,
-): string {
-  const tags = findXmlTags(xml, tagName);
-  if (tags.length === 0) {
-    return xml;
-  }
-
-  let nextXml = "";
-  let cursor = 0;
-
-  for (const tag of tags) {
-    nextXml += xml.slice(cursor, tag.start);
-    nextXml += rewriteTag(tag);
-    cursor = tag.end;
-  }
-
-  nextXml += xml.slice(cursor);
-  return nextXml;
-}
-
-function buildCountedXmlContainer(
-  tagName: string,
-  attributesSource: string,
-  countAttributeName: string,
-  childXml: string[],
-): string {
-  const attributes = parseAttributes(attributesSource);
-  const nextAttributes = [...attributes];
-  const countIndex = nextAttributes.findIndex(([name]) => name === countAttributeName);
-
-  if (countIndex === -1) {
-    nextAttributes.push([countAttributeName, String(childXml.length)]);
-  } else {
-    nextAttributes[countIndex] = [countAttributeName, String(childXml.length)];
-  }
-
-  const serializedAttributes = serializeAttributes(nextAttributes);
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${childXml.join("")}</${tagName}>`;
-}
-
-function buildXmlContainer(tagName: string, attributesSource: string, innerXml: string): string {
-  const serializedAttributes = serializeAttributes(parseAttributes(attributesSource));
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${tagName}>`;
-}
-
-function buildXmlElement(tagName: string, attributes: Array<[string, string]>, innerXml: string): string {
-  const serializedAttributes = serializeAttributes(attributes);
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}>${innerXml}</${tagName}>`;
-}
-
-function buildSelfClosingXmlElement(tagName: string, attributes: Array<[string, string]>): string {
-  const serializedAttributes = serializeAttributes(attributes);
-  return `<${tagName}${serializedAttributes ? ` ${serializedAttributes}` : ""}/>`;
 }
 
 function getSheetRelationshipsPath(sheetPath: string): string {
