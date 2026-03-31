@@ -25,6 +25,7 @@ import type {
 import { XlsxError } from "./errors.js";
 import {
   buildSheetIndex,
+  getLocatedCell,
   parseCellSnapshot,
   type SheetIndex,
 } from "./sheet/sheet-index.js";
@@ -751,9 +752,10 @@ export class Sheet {
    */
   getColumn(column: number | string): CellValue[] {
     const columnNumber = normalizeColumnNumber(column);
-    const cells = [...this.getSheetIndex().cells.values()]
-      .filter((cell) => cell.columnNumber === columnNumber)
-      .sort((left, right) => left.rowNumber - right.rowNumber);
+    const index = this.getSheetIndex();
+    const cells = index.rowNumbers
+      .map((rowNumber) => index.rows.get(rowNumber)?.cellsByColumn[columnNumber])
+      .filter((cell): cell is NonNullable<typeof cell> => cell !== undefined);
 
     if (cells.length === 0) {
       return [];
@@ -1419,7 +1421,7 @@ export class Sheet {
   setCell(rowNumber: number, column: number | string, value: CellValue): void;
   setCell(addressOrRowNumber: string | number, columnOrValue: number | string | CellValue, value?: CellValue): void {
     const normalizedAddress = resolveCellAddress(addressOrRowNumber, typeof addressOrRowNumber === "number" ? columnOrValue as number | string : undefined);
-    const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
+    const existingCell = getLocatedCell(this.getSheetIndex(), normalizedAddress);
     const nextValue = resolveSetCellValue(addressOrRowNumber, columnOrValue, value);
     this.writeCellXml(
       normalizedAddress,
@@ -1445,7 +1447,7 @@ export class Sheet {
     );
     const nextStyleId = resolveSetStyleId(addressOrRowNumber, columnOrStyleId, styleId);
     const index = this.getSheetIndex();
-    const existingCell = index.cells.get(normalizedAddress);
+    const existingCell = getLocatedCell(index, normalizedAddress);
 
     this.writeCellXml(
       normalizedAddress,
@@ -1504,7 +1506,7 @@ export class Sheet {
   deleteCell(addressOrRowNumber: string | number, column?: number | string): void {
     const normalizedAddress = resolveCellAddress(addressOrRowNumber, column);
     const index = this.getSheetIndex();
-    const existingCell = index.cells.get(normalizedAddress);
+    const existingCell = getLocatedCell(index, normalizedAddress);
 
     if (!existingCell) {
       return;
@@ -1536,7 +1538,7 @@ export class Sheet {
     options: SetFormulaOptions = {},
   ): void {
     const normalizedAddress = resolveCellAddress(addressOrRowNumber, typeof addressOrRowNumber === "number" ? columnOrFormula as number | string : undefined);
-    const existingCell = this.getSheetIndex().cells.get(normalizedAddress);
+    const existingCell = getLocatedCell(this.getSheetIndex(), normalizedAddress);
     const { formula, formulaOptions } = resolveSetFormulaArguments(
       addressOrRowNumber,
       columnOrFormula,
@@ -1819,7 +1821,7 @@ export class Sheet {
    * Reads the full parsed cell snapshot for an address.
    */
   readCellSnapshot(address: string): CellSnapshot {
-    const locatedCell = this.getSheetIndex().cells.get(normalizeCellAddress(address));
+    const locatedCell = getLocatedCell(this.getSheetIndex(), normalizeCellAddress(address));
     return parseCellSnapshot(locatedCell);
   }
 
@@ -1895,7 +1897,7 @@ export class Sheet {
 
   private writeCellXml(address: string, cellXml: string): void {
     const index = this.getSheetIndex();
-    const existingCell = index.cells.get(address);
+    const existingCell = getLocatedCell(index, address);
     const nextSheetXml = existingCell
       ? index.xml.slice(0, existingCell.start) + cellXml + index.xml.slice(existingCell.end)
       : insertCell(index, address, cellXml);

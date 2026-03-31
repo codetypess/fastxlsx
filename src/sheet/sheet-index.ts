@@ -9,7 +9,11 @@ export interface LocatedCell {
   start: number;
   end: number;
   attributesSource: string;
+  innerStart: number;
+  innerEnd: number;
+  rawType: string | null;
   snapshot: CellSnapshot;
+  styleId: number | null;
   rowNumber: number;
   columnNumber: number;
 }
@@ -36,7 +40,7 @@ interface UsedRangeBounds {
 
 export interface SheetIndex {
   xml: string;
-  cells: Map<string, LocatedCell>;
+  cells: Map<string, LocatedCell> | null;
   rows: Map<number, LocatedRow>;
   rowNumbers: number[];
   usedBounds: UsedRangeBounds | null;
@@ -74,7 +78,6 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
   const sheetDataInnerStart = sheetDataOpenTagEnd + 1;
   const sheetDataInnerEnd = sheetDataCloseTagStart;
   const rows = new Map<number, LocatedRow>();
-  const cells = new Map<string, LocatedCell>();
   const rowNumbers: number[] = [];
   let minRow = Number.POSITIVE_INFINITY;
   let maxRow = 0;
@@ -97,9 +100,10 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
     }
 
     const rowTagSource = sheetXml.slice(rowStart + 4, rowOpenTagEnd);
-    const selfClosing = isSelfClosingTagSource(rowTagSource);
-    const attributesSource = cleanTagAttributesSource(rowTagSource);
-    const rowNumberText = readXmlAttrFast(attributesSource, "r");
+    const rowMetadata = parseRowTagMetadata(rowTagSource);
+    const selfClosing = rowMetadata.selfClosing;
+    const attributesSource = rowMetadata.attributesSource;
+    const rowNumberText = rowMetadata.rowNumberText;
     const rowEnd = selfClosing
       ? rowOpenTagEnd + 1
       : sheetXml.indexOf("</row>", rowOpenTagEnd + 1);
@@ -142,9 +146,10 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
         }
 
         const cellTagSource = sheetXml.slice(cellStart + 2, cellOpenTagEnd);
-        const cellSelfClosing = isSelfClosingTagSource(cellTagSource);
-        const cellAttributesSource = cleanTagAttributesSource(cellTagSource);
-        const addressSource = readXmlAttrFast(cellAttributesSource, "r");
+        const cellMetadata = parseCellTagMetadata(cellTagSource);
+        const cellSelfClosing = cellMetadata.selfClosing;
+        const cellAttributesSource = cellMetadata.attributesSource;
+        const addressSource = cellMetadata.addressSource;
         const cellEnd = cellSelfClosing
           ? cellOpenTagEnd + 1
           : sheetXml.indexOf(CELL_CLOSE_TAG, cellOpenTagEnd + 1);
@@ -156,24 +161,26 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
 
         const address = addressSource.toUpperCase();
         const columnNumber = columnLabelToNumberFromAddress(address);
-        const innerXml = cellSelfClosing ? "" : sheetXml.slice(cellOpenTagEnd + 1, cellEnd);
-        const rawType = extractCellTypeAttr(cellAttributesSource);
-        const styleIdText = extractCellStyleAttr(cellAttributesSource);
-        const styleId = styleIdText === undefined ? null : Number(styleIdText);
+        const cellInnerStart = cellSelfClosing ? cellEnd : cellOpenTagEnd + 1;
+        const cellInnerEnd = cellSelfClosing ? cellEnd : cellEnd;
+        const rawType = cellMetadata.rawType;
+        const styleId = cellMetadata.styleIdText === undefined ? null : Number(cellMetadata.styleIdText);
         const cell: LocatedCell = {
           address,
           start: cellStart,
           end: cellSelfClosing ? cellEnd : cellEnd + CELL_CLOSE_TAG.length,
           attributesSource: cellAttributesSource,
-          snapshot: buildCellSnapshot(workbook, rawType, styleId, innerXml),
+          innerStart: cellInnerStart,
+          innerEnd: cellInnerEnd,
+          rawType,
+          snapshot: buildCellSnapshot(workbook, rawType, styleId, sheetXml, cellInnerStart, cellInnerEnd),
+          styleId,
           rowNumber,
           columnNumber,
         };
 
         row.cells.push(cell);
         row.cellsByColumn[columnNumber] = cell;
-        cells.set(address, cell);
-
         if (columnNumber < previousColumnNumber) {
           cellsAreSorted = false;
         }
@@ -187,13 +194,13 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
       }
     }
 
-    const rowHasUsedCells = hasUsedCells(row.cells);
-    row.maxColumnNumber = resolveLogicalRowMaxColumnNumber(row.cells);
+    const rowAnalysis = analyzeRowCells(row.cells);
+    row.maxColumnNumber = rowAnalysis.maxColumnNumber;
     if (row.maxColumnNumber > 0) {
       minColumn = Math.min(minColumn, row.cells[0]?.columnNumber ?? row.maxColumnNumber);
       maxColumn = Math.max(maxColumn, row.maxColumnNumber);
     }
-    if (rowHasUsedCells) {
+    if (rowAnalysis.hasUsedCells) {
       hasUsedBounds = true;
       minRow = Math.min(minRow, rowNumber);
       maxRow = Math.max(maxRow, rowNumber);
@@ -215,7 +222,7 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
 
   return {
     xml: sheetXml,
-    cells,
+    cells: null,
     rows,
     rowNumbers,
     usedBounds: hasUsedBounds ? { minRow, maxRow, minColumn, maxColumn } : null,
@@ -224,9 +231,28 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
   };
 }
 
-function resolveLogicalRowMaxColumnNumber(cells: LocatedCell[]): number {
+export function getLocatedCell(index: SheetIndex, address: string): LocatedCell | undefined {
+  if (!index.cells) {
+    index.cells = new Map<string, LocatedCell>();
+
+    for (const rowNumber of index.rowNumbers) {
+      const row = index.rows.get(rowNumber);
+      if (!row) {
+        continue;
+      }
+
+      for (const cell of row.cells) {
+        index.cells.set(cell.address, cell);
+      }
+    }
+  }
+
+  return index.cells.get(address);
+}
+
+function analyzeRowCells(cells: LocatedCell[]): { hasUsedCells: boolean; maxColumnNumber: number } {
   if (cells.length === 0) {
-    return 0;
+    return { hasUsedCells: false, maxColumnNumber: 0 };
   }
 
   let lastUsedIndex = -1;
@@ -250,7 +276,7 @@ function resolveLogicalRowMaxColumnNumber(cells: LocatedCell[]): number {
       logicalMaxColumnNumber = columnNumber;
     }
 
-    return logicalMaxColumnNumber;
+    return { hasUsedCells: false, maxColumnNumber: logicalMaxColumnNumber };
   }
 
   let logicalMaxColumnNumber = cells[lastUsedIndex]?.columnNumber ?? 0;
@@ -264,15 +290,11 @@ function resolveLogicalRowMaxColumnNumber(cells: LocatedCell[]): number {
     logicalMaxColumnNumber = cell.columnNumber;
   }
 
-  return logicalMaxColumnNumber;
+  return { hasUsedCells: true, maxColumnNumber: logicalMaxColumnNumber };
 }
 
 function isUsedCell(snapshot: CellSnapshot | undefined): boolean {
   return snapshot !== undefined && (snapshot.formula !== null || snapshot.value !== null);
-}
-
-function hasUsedCells(cells: LocatedCell[]): boolean {
-  return cells.some((cell) => isUsedCell(cell.snapshot));
 }
 
 export function parseCellAddressFast(address: string): { rowNumber: number; columnNumber: number } {
@@ -365,12 +387,12 @@ function buildCellSnapshot(
   workbook: Workbook,
   rawType: string | null,
   styleId: number | null,
-  innerXml: string,
+  xml: string,
+  innerStart: number,
+  innerEnd: number,
 ): CellSnapshot {
-  const formulaSource = extractCellFormulaText(innerXml);
-  const valueSource = extractCellValueText(innerXml);
-  const inlineText = rawType === "inlineStr" ? parseStringItemText(innerXml) : null;
-  const hasSelfClosingValue = valueSource === undefined && hasSelfClosingValueTag(innerXml);
+  const { formulaSource, hasSelfClosingValue, valueSource } = extractCellContentsFast(xml, innerStart, innerEnd);
+  const inlineText = rawType === "inlineStr" ? parseStringItemText(xml.slice(innerStart, innerEnd)) : null;
   const formula = formulaSource === null ? null : decodeXmlText(formulaSource);
   const value = parseCellValue(workbook, rawType, valueSource, inlineText, hasSelfClosingValue);
 
@@ -404,24 +426,106 @@ function buildCellSnapshot(
   };
 }
 
-function extractCellFormulaText(innerXml: string): string | null {
-  return extractTagTextFast(innerXml, "f");
-}
-
-function extractCellValueText(innerXml: string): string | undefined {
-  return extractTagTextFast(innerXml, "v") ?? undefined;
-}
-
-function hasSelfClosingValueTag(innerXml: string): boolean {
-  return hasSelfClosingTagFast(innerXml, "v");
-}
-
 function extractCellTypeAttr(attributesSource: string): string | null {
   return readXmlAttrFast(attributesSource, "t") ?? null;
 }
 
 function extractCellStyleAttr(attributesSource: string): string | undefined {
   return readXmlAttrFast(attributesSource, "s");
+}
+
+function parseRowTagMetadata(source: string): {
+  attributesSource: string;
+  rowNumberText: string | undefined;
+  selfClosing: boolean;
+} {
+  const selfClosing = isSelfClosingTagSource(source);
+  const attributesSource = cleanTagAttributesSource(source);
+  return {
+    attributesSource,
+    rowNumberText: readXmlAttrFast(attributesSource, "r"),
+    selfClosing,
+  };
+}
+
+function parseCellTagMetadata(source: string): {
+  addressSource: string | undefined;
+  attributesSource: string;
+  rawType: string | null;
+  selfClosing: boolean;
+  styleIdText: string | undefined;
+} {
+  const selfClosing = isSelfClosingTagSource(source);
+  const attributesSource = cleanTagAttributesSource(source);
+  let addressSource: string | undefined;
+  let rawType: string | null = null;
+  let styleIdText: string | undefined;
+  let index = 0;
+
+  while (index < attributesSource.length) {
+    while (index < attributesSource.length && isXmlWhitespaceCode(attributesSource.charCodeAt(index))) {
+      index += 1;
+    }
+
+    const nameStart = index;
+    while (index < attributesSource.length) {
+      const code = attributesSource.charCodeAt(index);
+      if (code === 61 || isXmlWhitespaceCode(code)) {
+        break;
+      }
+      index += 1;
+    }
+
+    if (index <= nameStart) {
+      break;
+    }
+
+    const name = attributesSource.slice(nameStart, index);
+    while (index < attributesSource.length && isXmlWhitespaceCode(attributesSource.charCodeAt(index))) {
+      index += 1;
+    }
+    if (attributesSource.charCodeAt(index) !== 61) {
+      while (index < attributesSource.length && !isXmlWhitespaceCode(attributesSource.charCodeAt(index))) {
+        index += 1;
+      }
+      continue;
+    }
+
+    index += 1;
+    while (index < attributesSource.length && isXmlWhitespaceCode(attributesSource.charCodeAt(index))) {
+      index += 1;
+    }
+
+    const quote = attributesSource.charCodeAt(index);
+    if (quote !== 34 && quote !== 39) {
+      continue;
+    }
+
+    const valueStart = index + 1;
+    const valueEnd = attributesSource.indexOf(String.fromCharCode(quote), valueStart);
+    if (valueEnd === -1) {
+      break;
+    }
+
+    const value = attributesSource.slice(valueStart, valueEnd);
+    if (name === "r") {
+      addressSource = value;
+    } else if (name === "t") {
+      rawType = value;
+    } else if (name === "s") {
+      styleIdText = value;
+    }
+
+    index = valueEnd + 1;
+  }
+
+  return {
+    addressSource,
+    attributesSource,
+    rawType,
+    selfClosing,
+    styleIdText,
+  };
 }
 
 function cleanTagAttributesSource(source: string): string {
@@ -502,50 +606,74 @@ function readXmlAttrFast(source: string, attributeName: string): string | undefi
   return undefined;
 }
 
-function extractTagTextFast(xml: string, tagName: string): string | null {
-  const tagStart = findTagStartFast(xml, tagName, 0);
-  if (tagStart === -1) {
-    return null;
-  }
+function extractCellContentsFast(xml: string, start: number, end: number): {
+  formulaSource: string | null;
+  hasSelfClosingValue: boolean;
+  valueSource: string | undefined;
+} {
+  let formulaSource: string | null = null;
+  let valueSource: string | undefined;
+  let hasSelfClosingValue = false;
+  let cursor = start;
 
-  const tagOpenEnd = xml.indexOf(">", tagStart + tagName.length + 1);
-  if (tagOpenEnd === -1 || isSelfClosingTagSource(xml.slice(tagStart + tagName.length + 1, tagOpenEnd))) {
-    return null;
-  }
-
-  const closeStart = xml.indexOf(`</${tagName}>`, tagOpenEnd + 1);
-  return closeStart === -1 ? null : xml.slice(tagOpenEnd + 1, closeStart);
-}
-
-function hasSelfClosingTagFast(xml: string, tagName: string): boolean {
-  const tagStart = findTagStartFast(xml, tagName, 0);
-  if (tagStart === -1) {
-    return false;
-  }
-
-  const tagOpenEnd = xml.indexOf(">", tagStart + tagName.length + 1);
-  return tagOpenEnd !== -1 && isSelfClosingTagSource(xml.slice(tagStart + tagName.length + 1, tagOpenEnd));
-}
-
-function findTagStartFast(xml: string, tagName: string, fromIndex: number): number {
-  const pattern = `<${tagName}`;
-  let searchStart = fromIndex;
-
-  while (searchStart < xml.length) {
-    const tagStart = xml.indexOf(pattern, searchStart);
+  while (cursor < end) {
+    const tagStart = xml.indexOf("<", cursor);
     if (tagStart === -1) {
-      return -1;
+      break;
+    }
+    if (tagStart >= end) {
+      break;
     }
 
-    const nextCode = xml.charCodeAt(tagStart + pattern.length);
-    if (Number.isNaN(nextCode) || isXmlTagBoundaryCode(nextCode)) {
-      return tagStart;
+    const nextCode = xml.charCodeAt(tagStart + 1);
+    if (nextCode === 47 || nextCode === 33 || nextCode === 63) {
+      cursor = tagStart + 1;
+      continue;
     }
 
-    searchStart = tagStart + pattern.length;
+    const tagOpenEnd = xml.indexOf(">", tagStart + 1);
+    if (tagOpenEnd === -1) {
+      break;
+    }
+    if (tagOpenEnd >= end) {
+      break;
+    }
+
+    const nameStart = tagStart + 1;
+    let nameEnd = nameStart;
+    while (nameEnd < tagOpenEnd) {
+      const code = xml.charCodeAt(nameEnd);
+      if (code === 47 || code === 62 || isXmlWhitespaceCode(code)) {
+        break;
+      }
+      nameEnd += 1;
+    }
+
+    const tagName = xml.slice(nameStart, nameEnd);
+    if (tagName === "f" || tagName === "v") {
+      const selfClosing = isSelfClosingTagSource(xml.slice(nameEnd, tagOpenEnd));
+      if (tagName === "v" && selfClosing) {
+        hasSelfClosingValue = true;
+      } else if (!selfClosing) {
+        const closeTag = `</${tagName}>`;
+        const closeStart = xml.indexOf(closeTag, tagOpenEnd + 1);
+        if (closeStart !== -1 && closeStart < end) {
+          const text = xml.slice(tagOpenEnd + 1, closeStart);
+          if (tagName === "f") {
+            formulaSource = text;
+          } else {
+            valueSource = text;
+          }
+          cursor = closeStart + closeTag.length;
+          continue;
+        }
+      }
+    }
+
+    cursor = tagOpenEnd + 1;
   }
 
-  return -1;
+  return { formulaSource, hasSelfClosingValue, valueSource };
 }
 
 function columnLabelToNumberFromAddress(address: string): number {
@@ -584,10 +712,6 @@ function isXmlWhitespaceCode(code: number): boolean {
 
 function isXmlAttributeBoundaryCode(code: number): boolean {
   return code === 47 || isXmlWhitespaceCode(code);
-}
-
-function isXmlTagBoundaryCode(code: number): boolean {
-  return code === 47 || code === 62 || isXmlWhitespaceCode(code);
 }
 
 const ROW_CLOSE_TAG = "</row>";
