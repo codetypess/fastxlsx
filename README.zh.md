@@ -49,6 +49,72 @@ npm i fastxlsx
 import { Workbook } from "fastxlsx";
 ```
 
+## 快速开始
+
+```ts
+import { Workbook } from "fastxlsx";
+
+const workbook = await Workbook.open("input.xlsx");
+const sheet = workbook.tryGetSheet("Sheet1");
+
+if (!sheet) {
+  throw new Error("Sheet1 not found");
+}
+
+console.log(sheet.getCell("B2"));
+console.log(sheet.getDisplayValue("B2"));
+console.log(sheet.cell("B2").text, sheet.cell("B2").error);
+
+sheet.batch((currentSheet) => {
+  currentSheet.setCell("A1", "Hello");
+  currentSheet.setCell("B2", 42);
+  currentSheet.setFormula("C2", "SUM(B2,8)", { cachedValue: 50 });
+});
+
+await workbook.save("output.xlsx");
+```
+
+## 常见任务
+
+从内存字节而不是磁盘打开：
+
+```ts
+const workbook = Workbook.fromUint8Array(xlsxBytes);
+const sameWorkbook = Workbook.fromArrayBuffer(arrayBuffer);
+const nextBytes = workbook.toUint8Array();
+```
+
+先安全探测 sheet，再决定是否读取：
+
+```ts
+console.log(workbook.getSheetNames());
+console.log(workbook.hasSheet("Config"));
+
+const configSheet = workbook.tryGetSheet("Config");
+if (configSheet) {
+  console.log(configSheet.getRecords());
+}
+```
+
+读取更贴近用户看到的值，以及 Excel 错误信息：
+
+```ts
+const cell = workbook.getSheet("Sheet1").cell("C5");
+
+console.log(cell.value);
+console.log(cell.text);
+console.log(cell.error);
+```
+
+把多次改动放进一个批次：
+
+```ts
+workbook.batch((currentWorkbook) => {
+  currentWorkbook.getSheet("Sheet1").setCell("A1", "left");
+  currentWorkbook.getSheet("Sheet2").setCell("A1", "right");
+});
+```
+
 ## 设计思路
 
 库分成两层：
@@ -85,10 +151,17 @@ import { Workbook } from "fastxlsx";
 
 - `Workbook.open(path)`
 - `Workbook.fromEntries(entries)`
+- `Workbook.fromUint8Array(data)`
+- `Workbook.fromArrayBuffer(data)`
 - `workbook.listEntries()`
+- `workbook.toUint8Array()`
 - `workbook.getSheets()`
+- `workbook.getSheetNames()`
 - `workbook.getSheet(name)`
+- `workbook.hasSheet(name)`
+- `workbook.tryGetSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.batch(applyChanges)`
 - `workbook.getNumberFormat(numFmtId)`
 - `workbook.updateNumberFormat(numFmtId, formatCode)`
 - `workbook.cloneNumberFormat(numFmtId, formatCode?)`
@@ -120,6 +193,8 @@ import { Workbook } from "fastxlsx";
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getDisplayValue(address)`
+- `sheet.getDisplayValue(rowNumber, column)`
 - `sheet.getAlignment(address)`
 - `sheet.getAlignment(rowNumber, column)`
 - `sheet.getNumberFormat(address)`
@@ -230,6 +305,7 @@ import { Workbook } from "fastxlsx";
 - `sheet.getFormula(rowNumber, column)`
 - `sheet.setFormula(address, formula, options?)`
 - `sheet.setFormula(rowNumber, column, formula, options?)`
+- `sheet.batch(applyChanges)`
 - `workbook.save(path)`
 
 示例：
@@ -241,78 +317,85 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
+const scoreText = sheet.getDisplayValue(2, 2);
 const scoreStyleId = sheet.getStyleId(2, 2);
 const headerRowStyleId = sheet.getRowStyleId(1);
 const scoreColumnStyleId = sheet.getColumnStyleId(2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
-workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
-workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
-workbook.renameSheet("Sheet1", "Summary");
-workbook.moveSheet("Summary", 0);
-workbook.setActiveSheet("Summary");
-workbook.setSheetVisibility("Summary", "hidden");
-detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
 console.log(sheet.rowCount, sheet.columnCount);
 console.log(sheet.getFreezePane(), sheet.getSelection(), activeSheet.name);
-sheet.addTable("A1:B10", { name: "Scores" });
-sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
-sheet.setHyperlink("B2", "#Summary!A1");
-sheet.setAutoFilter("A1:F20");
-sheet.freezePane(1, 1);
-sheet.setSelection("B2", "B2:C4");
-sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
-sheet.setCell(3, 2, 98);
-sheet.setStyleId(3, 2, scoreStyleId);
-sheet.setRowStyleId(1, headerRowStyleId);
-sheet.setColumnStyleId(2, scoreColumnStyleId);
-sheet.copyStyle("B2", "C2");
-sheet.setCell("A1", "Hello");
-sheet.deleteRow(8);
-sheet.deleteColumn("G");
-sheet.insertRow(2);
-sheet.setHeaders(["Name", "Score"]);
-sheet.insertColumn("B");
-sheet.setRecord(2, { Name: "Alice", Score: 98 });
-sheet.setRecords([
-  { Name: "Alice", Score: 98 },
-  { Name: "Bob", Score: 87 },
-]);
-sheet.deleteRecord(4);
-sheet.deleteRecords([6, 7]);
-sheet.addRecord({ Name: "Alice", Score: 98 });
-sheet.addRecords([
-  { Name: "Bob", Score: 87 },
-  { Name: "Cara", Score: 91 },
-]);
-sheet.appendRow(["tail", 1]);
-sheet.appendRows([
-  ["tail-2", 2],
-  ["tail-3", 3],
-]);
-sheet.setColumn("F", ["Q1", "Q2"], 2);
-sheet.setRow(5, ["Name", "Score"], 2);
-sheet.setRange("B2", [
-  [1, 2],
-  [3, 4],
-]);
-sheet.addMergedRange("D1:E1");
-sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
-sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
-sheet.removeHyperlink("B2");
-sheet.unfreezePane();
-sheet.removeAutoFilter();
-sheet.removeDataValidation("B2:B100");
-sheet.removeTable("Scores");
-detailSheet.setCell("A1", "created");
-workbook.setSheetVisibility("Summary", "visible");
+console.log(scoreCell.text, scoreCell.error, scoreText);
+
+workbook.batch((currentWorkbook) => {
+  currentWorkbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
+  currentWorkbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
+  currentWorkbook.renameSheet("Sheet1", "Summary");
+  currentWorkbook.moveSheet("Summary", 0);
+  currentWorkbook.setActiveSheet("Summary");
+  currentWorkbook.setSheetVisibility("Summary", "hidden");
+  detailSheet.rename("Detail 2026");
+  sheet.addTable("A1:B10", { name: "Scores" });
+  sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
+  sheet.setHyperlink("B2", "#Summary!A1");
+  sheet.setAutoFilter("A1:F20");
+  sheet.freezePane(1, 1);
+  sheet.setSelection("B2", "B2:C4");
+  sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
+  sheet.setCell(3, 2, 98);
+  sheet.setStyleId(3, 2, scoreStyleId);
+  sheet.setRowStyleId(1, headerRowStyleId);
+  sheet.setColumnStyleId(2, scoreColumnStyleId);
+  sheet.copyStyle("B2", "C2");
+  sheet.setCell("A1", "Hello");
+  sheet.deleteRow(8);
+  sheet.deleteColumn("G");
+  sheet.insertRow(2);
+  sheet.setHeaders(["Name", "Score"]);
+  sheet.insertColumn("B");
+  sheet.setRecord(2, { Name: "Alice", Score: 98 });
+  sheet.setRecords([
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+  sheet.deleteRecord(4);
+  sheet.deleteRecords([6, 7]);
+  sheet.addRecord({ Name: "Alice", Score: 98 });
+  sheet.addRecords([
+    { Name: "Bob", Score: 87 },
+    { Name: "Cara", Score: 91 },
+  ]);
+  sheet.appendRow(["tail", 1]);
+  sheet.appendRows([
+    ["tail-2", 2],
+    ["tail-3", 3],
+  ]);
+  sheet.setColumn("F", ["Q1", "Q2"], 2);
+  sheet.setRow(5, ["Name", "Score"], 2);
+  sheet.setRange("B2", [
+    [1, 2],
+    [3, 4],
+  ]);
+  sheet.addMergedRange("D1:E1");
+  sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+  sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
+  sheet.removeHyperlink("B2");
+  sheet.unfreezePane();
+  sheet.removeAutoFilter();
+  sheet.removeDataValidation("B2:B100");
+  sheet.removeTable("Scores");
+  detailSheet.setCell("A1", "created");
+  currentWorkbook.setSheetVisibility("Summary", "visible");
+  currentWorkbook.deleteDefinedName("LocalScore", "Summary");
+  currentWorkbook.deleteSheet("Temp");
+});
+
+console.log(workbook.getSheetNames(), workbook.hasSheet("Summary"), workbook.tryGetSheet("Temp"));
 console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
-workbook.deleteDefinedName("LocalScore", "Summary");
-workbook.deleteSheet("Temp");
-console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
+console.log(scoreValue, scoreCell.value, scoreCell.styleId, scoreCell.formula);
 
 await workbook.save("output.xlsx");
 ```
@@ -320,8 +403,13 @@ await workbook.save("output.xlsx");
 说明：
 
 - 同一张工作表首次读写时会扫描一次 `sheetData`，建立单元格与行的位置索引
-- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.style` / `cell.alignment` / `cell.font` / `cell.fill` / `cell.backgroundColor` / `cell.border` / `cell.numberFormat` 读取当前样式、对齐、字体、填充、背景色、边框和数字格式定义，并用 `cell.setStyle(patch)` / `cell.setAlignment(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBackgroundColor(color)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
+- `Workbook.fromUint8Array()`、`Workbook.fromArrayBuffer()` 和 `workbook.toUint8Array()` 覆盖了内存态工作流，适合浏览器、RPC 和上传处理场景
+- `workbook.getSheetNames()`、`hasSheet()`、`tryGetSheet()` 是更安全的查找接口；`getSheet()` 仍然保留“找不到就抛错”的严格语义
+- `workbook.batch()` 和 `sheet.batch()` 可以把一组相关改动包成一个批次，等外层批次结束时再统一做 worksheet `dimension` 同步
+- `sheet.cell(address)` 返回可复用的 `Cell` 句柄，值/公式/样式索引会按工作表 revision 缓存；现在也可以通过 `cell.text` / `cell.error` / `cell.style` / `cell.alignment` / `cell.font` / `cell.fill` / `cell.backgroundColor` / `cell.border` / `cell.numberFormat` 读取当前状态，并用 `cell.setStyle(patch)` / `cell.setAlignment(patch)` / `cell.setFont(patch)` / `cell.setFill(patch)` / `cell.setBackgroundColor(color)` / `cell.setBorder(patch)` / `cell.setNumberFormat(formatCode)` / `cell.cloneStyle(patch?)` 直接派生并应用新样式
 - `sheet.cell()` / `getCell()` / `setCell()` / `getFormula()` / `setFormula()` 现在同时支持 `A1` 地址和 `(rowNumber, column)` 两种调用方式；行列索引是从 `1` 开始
+- `sheet.getDisplayValue()` 和 `cell.text` 是 best-effort 的显示值读取接口：Excel 错误值会保留原文，布尔值会输出 `TRUE` / `FALSE`，其余情况直接基于缓存值做字符串化
+- 现在 Excel 错误单元格会额外暴露 `cell.error` / `snapshot.error`。纯错误单元格会标成 `type: "error"`；公式单元格如果缓存结果是错误，则仍然是 `type: "formula"`，但会附带结构化错误信息
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 表示逻辑 used range 的最大行号 / 最大列号，只统计当前带值或公式的单元格；纯空白占位的 `<c>` 节点和只包含空白占位单元格的物理行都不会扩展 used range。空表返回 `0`
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` / `getRangeRef()` 是默认的逻辑读取 API，会跳过既没有值也没有公式的空白占位 `<c>` 节点，并按逻辑 used bounds 工作
@@ -356,7 +444,7 @@ await workbook.save("output.xlsx");
 - `sheet.copyStyle()` 当前会把源单元格的 `styleId` 复制到目标单元格，不会改动目标单元格的值或公式；同样支持地址和 `(rowNumber, column)` 两种调用
 - `sheet.getFreezePane()` / `freezePane()` / `unfreezePane()` 当前维护 worksheet `sheetViews/sheetView/pane`；插删行列时 `topLeftCell` 也会继续跟随更新
 - `sheet.getSelection()` / `setSelection()` 当前读写 worksheet `sheetViews/sheetView/selection`；冻结窗格存在时会优先落在当前 active pane 对应的 selection 上
-- 每次写入后会重建该表索引，保证后续读取拿到的是最新结果
+- 非 batch 模式下，每次写入后都会立刻重建 sheet index，确保后续读取看到的是最新内容；在 `sheet.batch()` / `workbook.batch()` 内，最终的 `dimension` 同步会延后到批次 flush 时统一完成
 - 修改工作表后会同步维护 `<dimension ref="...">`，避免使用范围信息过期
 - `deleteRow()` / `deleteColumn()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式
 - `insertRow()` 当前会同步更新本 sheet 的单元格坐标、公式引用、合并区域、`dimension`、常见 `ref/sqref` 属性、`definedNames`，以及其它 sheet 里显式引用它的公式

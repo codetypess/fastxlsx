@@ -5,12 +5,16 @@ import { rewriteXmlTagsByName } from "./workbook-xml.js";
 import { decodeXmlText, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
 export function requireSheetByName(sheets: Sheet[], sheetName: string): Sheet {
-  const sheet = sheets.find((candidate) => candidate.name === sheetName);
+  const sheet = findSheetByName(sheets, sheetName);
   if (!sheet) {
     throw new XlsxError(`Sheet not found: ${sheetName}`);
   }
 
   return sheet;
+}
+
+export function findSheetByName(sheets: Sheet[], sheetName: string): Sheet | null {
+  return sheets.find((candidate) => candidate.name === sheetName) ?? null;
 }
 
 export function resolveLocalSheetId(sheets: Sheet[], scope: string | null): number | null {

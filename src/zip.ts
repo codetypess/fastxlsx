@@ -8,7 +8,22 @@ import type { ArchiveEntry } from "./types.js";
 export class Zip {
   async readArchive(filePath: string): Promise<ArchiveEntry[]> {
     const archiveData = await readFile(filePath);
-    const entriesByPath = unzipSync(new Uint8Array(archiveData));
+    return this.readArchiveData(new Uint8Array(archiveData));
+  }
+
+  async writeArchive(filePath: string, entries: Iterable<ArchiveEntry>): Promise<void> {
+    const destinationDirectory = dirname(filePath);
+    if (destinationDirectory !== ".") {
+      await mkdir(destinationDirectory, { recursive: true });
+    }
+
+    await writeFile(filePath, this.writeArchiveData(entries));
+  }
+
+  readArchiveData(archiveData: Uint8Array | ArrayBuffer): ArchiveEntry[] {
+    const entriesByPath = unzipSync(
+      archiveData instanceof Uint8Array ? archiveData : new Uint8Array(archiveData),
+    );
 
     return Object.keys(entriesByPath)
       .sort((left, right) => left.localeCompare(right))
@@ -18,19 +33,13 @@ export class Zip {
       }));
   }
 
-  async writeArchive(filePath: string, entries: Iterable<ArchiveEntry>): Promise<void> {
-    const destinationDirectory = dirname(filePath);
-    if (destinationDirectory !== ".") {
-      await mkdir(destinationDirectory, { recursive: true });
-    }
-
+  writeArchiveData(entries: Iterable<ArchiveEntry>): Uint8Array {
     const sources: Record<string, Uint8Array> = {};
     for (const entry of entries) {
       sources[entry.path] = entry.data;
     }
 
-    const zipped = zipSync(sources, { level: 6 });
-    await writeFile(filePath, zipped);
+    return zipSync(sources, { level: 6 });
   }
 
   async readDirectoryEntries(directoryPath: string, root = directoryPath): Promise<ArchiveEntry[]> {

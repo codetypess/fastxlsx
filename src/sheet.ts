@@ -178,6 +178,7 @@ export class Sheet {
   readonly relationshipId: string;
 
   private readonly cellHandles = new Map<string, Cell>();
+  private hasPendingBatchWrite = false;
   private revision = 0;
   private readonly workbook: Workbook;
   private sheetIndex?: SheetIndex;
@@ -223,6 +224,13 @@ export class Sheet {
   }
 
   /**
+   * Groups multiple worksheet mutations and flushes sheet metadata once at the end.
+   */
+  batch<Result>(applyChanges: (sheet: Sheet) => Result): Result {
+    return this.workbook.batch(() => applyChanges(this));
+  }
+
+  /**
    * Reads the current cell value.
    *
    * Numeric row and column arguments are 1-based.
@@ -235,6 +243,21 @@ export class Sheet {
     }
 
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).value;
+  }
+
+  /**
+   * Reads a best-effort display string for the current cell value.
+   *
+   * This is intended for user-facing inspection, not full Excel-format emulation.
+   */
+  getDisplayValue(address: string): string | null;
+  getDisplayValue(rowNumber: number, column: number | string): string | null;
+  getDisplayValue(addressOrRowNumber: string | number, column?: number | string): string | null {
+    const snapshot =
+      typeof addressOrRowNumber === "number"
+        ? this.readCellSnapshotByIndexes(addressOrRowNumber, column)
+        : this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column));
+    return formatCellDisplayValue(snapshot);
   }
 
   /**
@@ -2016,6 +2039,15 @@ export class Sheet {
 
   private writeSheetXml(nextSheetXml: string): void {
     const indexedSheet = buildSheetIndex(this.workbook, nextSheetXml);
+    if (this.workbook.isBatching()) {
+      this.workbook.writeEntryText(this.path, nextSheetXml);
+      this.sheetIndex = indexedSheet;
+      this.hasPendingBatchWrite = true;
+      this.workbook.markSheetDirty(this);
+      this.revision += 1;
+      return;
+    }
+
     const normalizedSheetXml = updateDimensionRef(indexedSheet);
 
     this.workbook.writeEntryText(this.path, normalizedSheetXml);
@@ -2023,8 +2055,39 @@ export class Sheet {
       normalizedSheetXml === nextSheetXml ? indexedSheet : buildSheetIndex(this.workbook, normalizedSheetXml);
     this.revision += 1;
   }
+
+  finalizeBatchWrite(): void {
+    if (!this.hasPendingBatchWrite || !this.sheetIndex) {
+      return;
+    }
+
+    const normalizedSheetXml = updateDimensionRef(this.sheetIndex);
+    this.workbook.writeEntryText(this.path, normalizedSheetXml);
+    this.sheetIndex =
+      normalizedSheetXml === this.sheetIndex.xml
+        ? this.sheetIndex
+        : buildSheetIndex(this.workbook, normalizedSheetXml);
+    this.hasPendingBatchWrite = false;
+    this.revision += 1;
+  }
 }
 
 function isLogicalCellEntry(cell: Pick<CellEntry, "formula" | "value">): boolean {
   return cell.formula !== null || cell.value !== null;
+}
+
+function formatCellDisplayValue(cell: Pick<CellSnapshot, "error" | "value">): string | null {
+  if (cell.error) {
+    return cell.error.text;
+  }
+
+  if (cell.value === null) {
+    return null;
+  }
+
+  if (typeof cell.value === "boolean") {
+    return cell.value ? "TRUE" : "FALSE";
+  }
+
+  return String(cell.value);
 }

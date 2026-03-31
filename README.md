@@ -53,6 +53,72 @@ npm i fastxlsx
 import { Workbook } from "fastxlsx";
 ```
 
+## Quick Start
+
+```ts
+import { Workbook } from "fastxlsx";
+
+const workbook = await Workbook.open("input.xlsx");
+const sheet = workbook.tryGetSheet("Sheet1");
+
+if (!sheet) {
+  throw new Error("Sheet1 not found");
+}
+
+console.log(sheet.getCell("B2"));
+console.log(sheet.getDisplayValue("B2"));
+console.log(sheet.cell("B2").text, sheet.cell("B2").error);
+
+sheet.batch((currentSheet) => {
+  currentSheet.setCell("A1", "Hello");
+  currentSheet.setCell("B2", 42);
+  currentSheet.setFormula("C2", "SUM(B2,8)", { cachedValue: 50 });
+});
+
+await workbook.save("output.xlsx");
+```
+
+## Common Tasks
+
+Open from memory instead of disk:
+
+```ts
+const workbook = Workbook.fromUint8Array(xlsxBytes);
+const sameWorkbook = Workbook.fromArrayBuffer(arrayBuffer);
+const nextBytes = workbook.toUint8Array();
+```
+
+Safely discover sheets before reading:
+
+```ts
+console.log(workbook.getSheetNames());
+console.log(workbook.hasSheet("Config"));
+
+const configSheet = workbook.tryGetSheet("Config");
+if (configSheet) {
+  console.log(configSheet.getRecords());
+}
+```
+
+Read user-facing values and Excel errors:
+
+```ts
+const cell = workbook.getSheet("Sheet1").cell("C5");
+
+console.log(cell.value);
+console.log(cell.text);
+console.log(cell.error);
+```
+
+Batch multiple writes together:
+
+```ts
+workbook.batch((currentWorkbook) => {
+  currentWorkbook.getSheet("Sheet1").setCell("A1", "left");
+  currentWorkbook.getSheet("Sheet2").setCell("A1", "right");
+});
+```
+
 ## Design
 
 The library is split into two layers:
@@ -90,10 +156,17 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 
 - `Workbook.open(path)`
 - `Workbook.fromEntries(entries)`
+- `Workbook.fromUint8Array(data)`
+- `Workbook.fromArrayBuffer(data)`
 - `workbook.listEntries()`
+- `workbook.toUint8Array()`
 - `workbook.getSheets()`
+- `workbook.getSheetNames()`
 - `workbook.getSheet(name)`
+- `workbook.hasSheet(name)`
+- `workbook.tryGetSheet(name)`
 - `workbook.getActiveSheet()`
+- `workbook.batch(applyChanges)`
 - `workbook.getNumberFormat(numFmtId)`
 - `workbook.updateNumberFormat(numFmtId, formatCode)`
 - `workbook.cloneNumberFormat(numFmtId, formatCode?)`
@@ -125,6 +198,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.rename(name)`
 - `sheet.getCell(address)`
 - `sheet.getCell(rowNumber, column)`
+- `sheet.getDisplayValue(address)`
+- `sheet.getDisplayValue(rowNumber, column)`
 - `sheet.getAlignment(address)`
 - `sheet.getAlignment(rowNumber, column)`
 - `sheet.getNumberFormat(address)`
@@ -235,6 +310,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getFormula(rowNumber, column)`
 - `sheet.setFormula(address, formula, options?)`
 - `sheet.setFormula(rowNumber, column, formula, options?)`
+- `sheet.batch(applyChanges)`
 - `workbook.save(path)`
 
 Example:
@@ -246,78 +322,85 @@ const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");
 const scoreValue = sheet.getCell(2, 2);
+const scoreText = sheet.getDisplayValue(2, 2);
 const scoreStyleId = sheet.getStyleId(2, 2);
 const headerRowStyleId = sheet.getRowStyleId(1);
 const scoreColumnStyleId = sheet.getColumnStyleId(2);
 const detailSheet = workbook.addSheet("Detail");
 const activeSheet = workbook.getActiveSheet();
 
-workbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
-workbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
-workbook.renameSheet("Sheet1", "Summary");
-workbook.moveSheet("Summary", 0);
-workbook.setActiveSheet("Summary");
-workbook.setSheetVisibility("Summary", "hidden");
-detailSheet.rename("Detail 2026");
 console.log(sheet.getTables());
 console.log(sheet.getHyperlinks());
 console.log(sheet.rowCount, sheet.columnCount);
 console.log(sheet.getFreezePane(), sheet.getSelection(), activeSheet.name);
-sheet.addTable("A1:B10", { name: "Scores" });
-sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
-sheet.setHyperlink("B2", "#Summary!A1");
-sheet.setAutoFilter("A1:F20");
-sheet.freezePane(1, 1);
-sheet.setSelection("B2", "B2:C4");
-sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
-sheet.setCell(3, 2, 98);
-sheet.setStyleId(3, 2, scoreStyleId);
-sheet.setRowStyleId(1, headerRowStyleId);
-sheet.setColumnStyleId(2, scoreColumnStyleId);
-sheet.copyStyle("B2", "C2");
-sheet.setCell("A1", "Hello");
-sheet.deleteRow(8);
-sheet.deleteColumn("G");
-sheet.insertRow(2);
-sheet.setHeaders(["Name", "Score"]);
-sheet.insertColumn("B");
-sheet.setRecord(2, { Name: "Alice", Score: 98 });
-sheet.setRecords([
-  { Name: "Alice", Score: 98 },
-  { Name: "Bob", Score: 87 },
-]);
-sheet.deleteRecord(4);
-sheet.deleteRecords([6, 7]);
-sheet.addRecord({ Name: "Alice", Score: 98 });
-sheet.addRecords([
-  { Name: "Bob", Score: 87 },
-  { Name: "Cara", Score: 91 },
-]);
-sheet.appendRow(["tail", 1]);
-sheet.appendRows([
-  ["tail-2", 2],
-  ["tail-3", 3],
-]);
-sheet.setColumn("F", ["Q1", "Q2"], 2);
-sheet.setRow(5, ["Name", "Score"], 2);
-sheet.setRange("B2", [
-  [1, 2],
-  [3, 4],
-]);
-sheet.addMergedRange("D1:E1");
-sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
-sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
-sheet.removeHyperlink("B2");
-sheet.unfreezePane();
-sheet.removeAutoFilter();
-sheet.removeDataValidation("B2:B100");
-sheet.removeTable("Scores");
-detailSheet.setCell("A1", "created");
-workbook.setSheetVisibility("Summary", "visible");
+console.log(scoreCell.text, scoreCell.error, scoreText);
+
+workbook.batch((currentWorkbook) => {
+  currentWorkbook.setDefinedName("Scores", "Summary!$A$1:$B$10");
+  currentWorkbook.setDefinedName("LocalScore", "$B$2", { scope: "Summary" });
+  currentWorkbook.renameSheet("Sheet1", "Summary");
+  currentWorkbook.moveSheet("Summary", 0);
+  currentWorkbook.setActiveSheet("Summary");
+  currentWorkbook.setSheetVisibility("Summary", "hidden");
+  detailSheet.rename("Detail 2026");
+  sheet.addTable("A1:B10", { name: "Scores" });
+  sheet.setHyperlink("A1", "https://example.com", { text: "Hello", tooltip: "Open link" });
+  sheet.setHyperlink("B2", "#Summary!A1");
+  sheet.setAutoFilter("A1:F20");
+  sheet.freezePane(1, 1);
+  sheet.setSelection("B2", "B2:C4");
+  sheet.setDataValidation("B2:B100", { type: "whole", operator: "between", formula1: "0", formula2: "100" });
+  sheet.setCell(3, 2, 98);
+  sheet.setStyleId(3, 2, scoreStyleId);
+  sheet.setRowStyleId(1, headerRowStyleId);
+  sheet.setColumnStyleId(2, scoreColumnStyleId);
+  sheet.copyStyle("B2", "C2");
+  sheet.setCell("A1", "Hello");
+  sheet.deleteRow(8);
+  sheet.deleteColumn("G");
+  sheet.insertRow(2);
+  sheet.setHeaders(["Name", "Score"]);
+  sheet.insertColumn("B");
+  sheet.setRecord(2, { Name: "Alice", Score: 98 });
+  sheet.setRecords([
+    { Name: "Alice", Score: 98 },
+    { Name: "Bob", Score: 87 },
+  ]);
+  sheet.deleteRecord(4);
+  sheet.deleteRecords([6, 7]);
+  sheet.addRecord({ Name: "Alice", Score: 98 });
+  sheet.addRecords([
+    { Name: "Bob", Score: 87 },
+    { Name: "Cara", Score: 91 },
+  ]);
+  sheet.appendRow(["tail", 1]);
+  sheet.appendRows([
+    ["tail-2", 2],
+    ["tail-3", 3],
+  ]);
+  sheet.setColumn("F", ["Q1", "Q2"], 2);
+  sheet.setRow(5, ["Name", "Score"], 2);
+  sheet.setRange("B2", [
+    [1, 2],
+    [3, 4],
+  ]);
+  sheet.addMergedRange("D1:E1");
+  sheet.setFormula("B1", "SUM(1,2)", { cachedValue: 3 });
+  sheet.setFormula(4, 3, "SUM(A4:B4)", { cachedValue: 12 });
+  sheet.removeHyperlink("B2");
+  sheet.unfreezePane();
+  sheet.removeAutoFilter();
+  sheet.removeDataValidation("B2:B100");
+  sheet.removeTable("Scores");
+  detailSheet.setCell("A1", "created");
+  currentWorkbook.setSheetVisibility("Summary", "visible");
+  currentWorkbook.deleteDefinedName("LocalScore", "Summary");
+  currentWorkbook.deleteSheet("Temp");
+});
+
+console.log(workbook.getSheetNames(), workbook.hasSheet("Summary"), workbook.tryGetSheet("Temp"));
 console.log(workbook.getDefinedNames(), workbook.getDefinedName("LocalScore", "Summary"));
-workbook.deleteDefinedName("LocalScore", "Summary");
-workbook.deleteSheet("Temp");
-console.log(scoreCell.value, scoreCell.styleId, scoreCell.formula);
+console.log(scoreValue, scoreCell.value, scoreCell.styleId, scoreCell.formula);
 
 await workbook.save("output.xlsx");
 ```
@@ -325,8 +408,13 @@ await workbook.save("output.xlsx");
 Notes:
 
 - On first read/write access, a sheet scans `sheetData` once and builds indexes for rows and cells.
-- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.style`, `cell.alignment`, `cell.font`, `cell.fill`, `cell.backgroundColor`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setAlignment(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBackgroundColor(color)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
+- `Workbook.fromUint8Array()`, `Workbook.fromArrayBuffer()`, and `workbook.toUint8Array()` cover in-memory workflows for browser, RPC, and upload pipelines.
+- `workbook.getSheetNames()`, `hasSheet()`, and `tryGetSheet()` are the safe lookup APIs; `getSheet()` remains the strict variant that throws when a sheet is missing.
+- `workbook.batch()` and `sheet.batch()` group related edits and flush pending sheet-dimension normalization once at the end of the outer batch.
+- `sheet.cell(address)` returns a reusable `Cell` handle whose parsed value/formula/style-index state is cached by sheet revision. It now also exposes `cell.text`, `cell.error`, `cell.style`, `cell.alignment`, `cell.font`, `cell.fill`, `cell.backgroundColor`, `cell.border`, `cell.numberFormat`, `cell.setStyle(patch)`, `cell.setAlignment(patch)`, `cell.setFont(patch)`, `cell.setFill(patch)`, `cell.setBackgroundColor(color)`, `cell.setBorder(patch)`, `cell.setNumberFormat(formatCode)`, and `cell.cloneStyle(patch?)`.
 - `sheet.cell()`, `getCell()`, `setCell()`, `getFormula()`, and `setFormula()` now support both `A1` addresses and `(rowNumber, column)` calls. Row and column indexes are 1-based.
+- `sheet.getDisplayValue()` and `cell.text` are best-effort user-facing readers: they preserve Excel error text, stringify booleans as `TRUE` / `FALSE`, and otherwise stringify the cached value directly.
+- Cells with cached Excel errors now expose `cell.error` / `snapshot.error` metadata. Pure error cells use `type: "error"`, while formula cells with error caches keep `type: "formula"` and still expose the structured error payload.
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` mean the logical used bounds based on cells that currently have a value or formula. Pure blank placeholder `<c>` nodes and blank-only physical rows do not extend the used range. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, `getColumnEntries()`, and `getRangeRef()` are the default logical read APIs. They skip blank placeholder `<c>` nodes that have neither a value nor a formula, and they follow the logical used bounds.
@@ -361,7 +449,7 @@ Notes:
 - `sheet.copyStyle()` currently copies the source cell's `styleId` onto the target cell without changing the target cell's value or formula; both address and `(rowNumber, column)` calls are supported.
 - `sheet.getFreezePane()`, `freezePane()`, and `unfreezePane()` currently manage worksheet `sheetViews/sheetView/pane`; `topLeftCell` keeps tracking row and column insert/delete operations.
 - `sheet.getSelection()` and `setSelection()` currently read and write worksheet `sheetViews/sheetView/selection`; when a frozen pane exists, they target the selection for the current active pane.
-- After each write, the sheet index is rebuilt so later reads always see the latest content.
+- Outside batches, each write rebuilds the sheet index immediately so later reads always see the latest content. Inside `sheet.batch()` / `workbook.batch()`, the final dimension sync is deferred until the batch flushes.
 - Worksheet edits keep `<dimension ref="...">` in sync so used-range metadata does not go stale.
 - `deleteRow()` and `deleteColumn()` currently update cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.
 - `insertRow()` currently updates cell coordinates, formulas, merged ranges, worksheet `dimension`, common `ref` and `sqref` attributes, `definedNames`, and explicit formulas in other sheets that reference the edited sheet.

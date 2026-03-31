@@ -52,6 +52,7 @@ export function parseCellSnapshot(cell: LocatedCell | undefined): CellSnapshot {
   if (!cell) {
     return {
       exists: false,
+      error: null,
       formula: null,
       rawType: null,
       styleId: null,
@@ -375,6 +376,10 @@ function parseCellValue(
     return valueSource === "1";
   }
 
+  if (rawType === "e") {
+    return valueSource === undefined ? null : decodeXmlText(valueSource);
+  }
+
   if (valueSource === undefined) {
     return null;
   }
@@ -395,10 +400,12 @@ function buildCellSnapshot(
   const inlineText = rawType === "inlineStr" ? parseStringItemText(xml.slice(innerStart, innerEnd)) : null;
   const formula = formulaSource === null ? null : decodeXmlText(formulaSource);
   const value = parseCellValue(workbook, rawType, valueSource, inlineText, hasSelfClosingValue);
+  const error = parseCellError(rawType, valueSource);
 
   if (formula !== null) {
     return {
       exists: true,
+      error,
       formula,
       rawType,
       styleId,
@@ -408,7 +415,9 @@ function buildCellSnapshot(
   }
 
   const type: CellType =
-    value === null
+    error !== null
+      ? "error"
+      : value === null
       ? "blank"
       : typeof value === "string"
         ? "string"
@@ -418,11 +427,24 @@ function buildCellSnapshot(
 
   return {
     exists: true,
+    error,
     formula: null,
     rawType,
     styleId,
     type,
     value,
+  };
+}
+
+function parseCellError(rawType: string | null, valueSource: string | undefined): CellSnapshot["error"] {
+  if (rawType !== "e" || valueSource === undefined) {
+    return null;
+  }
+
+  const text = decodeXmlText(valueSource);
+  return {
+    code: EXCEL_ERROR_CODES[text] ?? null,
+    text,
   };
 }
 
@@ -716,3 +738,14 @@ function isXmlAttributeBoundaryCode(code: number): boolean {
 
 const ROW_CLOSE_TAG = "</row>";
 const CELL_CLOSE_TAG = "</c>";
+
+const EXCEL_ERROR_CODES: Record<string, number> = {
+  "#NULL!": 0x00,
+  "#DIV/0!": 0x07,
+  "#VALUE!": 0x0f,
+  "#REF!": 0x17,
+  "#NAME?": 0x1d,
+  "#NUM!": 0x24,
+  "#N/A": 0x2a,
+  "#GETTING_DATA": 0x2b,
+};

@@ -8,6 +8,7 @@ import type {
   CellFillPatch,
   CellFontDefinition,
   CellFontPatch,
+  CellError,
   CellNumberFormatDefinition,
   CellSnapshot,
   CellStyleDefinition,
@@ -56,6 +57,13 @@ export class Cell {
    */
   get formula(): string | null {
     return this.getSnapshot().formula;
+  }
+
+  /**
+   * Structured Excel error metadata for cells with `t="e"` cached values.
+   */
+  get error(): CellError | null {
+    return this.getSnapshot().error;
   }
 
   /**
@@ -133,6 +141,13 @@ export class Cell {
    */
   get value(): CellValue {
     return this.getSnapshot().value;
+  }
+
+  /**
+   * Best-effort display text for the current cell value.
+   */
+  get text(): string | null {
+    return this.sheet.getDisplayValue(this.address);
   }
 
   /**

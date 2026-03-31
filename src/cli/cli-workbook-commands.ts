@@ -1,7 +1,7 @@
 import { Command } from "commander";
 
 import { parseJsonCellValue, writeJson } from "./cli-json.js";
-import type { CellValue, DefinedName, SheetVisibility } from "../types.js";
+import type { CellError, CellValue, DefinedName, SheetVisibility } from "../types.js";
 import { parsePositiveInteger, resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
 import { Workbook } from "../workbook.js";
@@ -25,6 +25,7 @@ interface GetCellResult {
   backgroundColor: string | null;
   cell: string;
   exists: boolean;
+  error: CellError | null;
   file: string;
   formula: string | null;
   numberFormat: string | null;
@@ -376,6 +377,7 @@ async function getCell(filePath: string, sheetName: string, cellAddress: string)
     backgroundColor: sheet.getBackgroundColor(cellAddress),
     cell: cellAddress,
     exists: cell.exists,
+    error: cell.error,
     file: filePath,
     formula: cell.formula,
     numberFormat: cell.numberFormat?.code ?? null,

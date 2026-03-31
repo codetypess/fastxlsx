@@ -4,7 +4,7 @@ export interface ArchiveEntry {
 }
 
 export type CellValue = string | number | boolean | null;
-export type CellType = "missing" | "blank" | "string" | "number" | "boolean" | "formula";
+export type CellType = "missing" | "blank" | "string" | "number" | "boolean" | "error" | "formula";
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 export type OpenXmlStringEnum = string & {};
 export type CellStyleHorizontalAlignment =
@@ -69,8 +69,14 @@ export type CellBorderStyle =
   | "slantDashDot"
   | OpenXmlStringEnum;
 
+export interface CellError {
+  code: number | null;
+  text: string;
+}
+
 export interface CellSnapshot {
   exists: boolean;
+  error: CellError | null;
   formula: string | null;
   rawType: string | null;
   styleId: number | null;

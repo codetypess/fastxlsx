@@ -65,6 +65,7 @@ import {
 } from "./workbook/workbook-sheet-package.js";
 import {
   countVisibleSheets,
+  findSheetByName,
   requireSheetByName,
   resolveLocalSheetId,
   rewriteFormulaXml,
@@ -183,6 +184,8 @@ export class Workbook {
   private readonly adapter: Zip;
   private readonly entryOrder: string[];
   private readonly entries: Map<string, Uint8Array>;
+  private batchDepth = 0;
+  private readonly batchedSheets = new Set<Sheet>();
   private workbookContext?: WorkbookContext;
   private sharedStringsCache?: string[];
   private stylesCache?: StylesCache | null;
@@ -219,6 +222,21 @@ export class Workbook {
   }
 
   /**
+   * Opens an `.xlsx` archive that is already loaded as bytes.
+   */
+  static fromUint8Array(data: Uint8Array): Workbook {
+    const adapter = new Zip();
+    return new Workbook(adapter.readArchiveData(data), adapter, { cloneEntryData: false });
+  }
+
+  /**
+   * Opens an `.xlsx` archive from an ArrayBuffer.
+   */
+  static fromArrayBuffer(data: ArrayBuffer): Workbook {
+    return Workbook.fromUint8Array(new Uint8Array(data));
+  }
+
+  /**
    * Creates a workbook from archive entries that are already in memory.
    */
   static fromEntries(entries: Iterable<ArchiveEntry>): Workbook {
@@ -240,10 +258,51 @@ export class Workbook {
   }
 
   /**
+   * Groups multiple workbook or sheet mutations into one logical batch.
+   */
+  batch<Result>(applyChanges: (workbook: Workbook) => Result): Result {
+    this.batchDepth += 1;
+
+    try {
+      return applyChanges(this);
+    } finally {
+      this.batchDepth -= 1;
+
+      if (this.batchDepth === 0) {
+        for (const sheet of this.batchedSheets) {
+          sheet.finalizeBatchWrite();
+        }
+        this.batchedSheets.clear();
+      }
+    }
+  }
+
+  /**
+   * Returns worksheet names in workbook order.
+   */
+  getSheetNames(): string[] {
+    return this.getWorkbookContext().sheets.map((sheet) => sheet.name);
+  }
+
+  /**
    * Returns a worksheet by name.
    */
   getSheet(sheetName: string): Sheet {
     return requireSheetByName(this.getWorkbookContext().sheets, sheetName);
+  }
+
+  /**
+   * Returns whether a worksheet with the given name exists.
+   */
+  hasSheet(sheetName: string): boolean {
+    return this.tryGetSheet(sheetName) !== null;
+  }
+
+  /**
+   * Returns a worksheet by name, or null when it does not exist.
+   */
+  tryGetSheet(sheetName: string): Sheet | null {
+    return findSheetByName(this.getWorkbookContext().sheets, sheetName);
   }
 
   /**
@@ -885,6 +944,13 @@ export class Workbook {
   }
 
   /**
+   * Exports the current workbook contents as a zipped `.xlsx` byte array.
+   */
+  toUint8Array(): Uint8Array {
+    return this.adapter.writeArchiveData(this.getEntriesView());
+  }
+
+  /**
    * Exports the workbook as detached archive entries.
    */
   toEntries(): ArchiveEntry[] {
@@ -1087,5 +1153,13 @@ export class Workbook {
     if (shouldResetWorkbookContext(this.workbookContext, path) || this.workbookContext?.sharedStringsPath === path) {
       this.workbookContext = undefined;
     }
+  }
+
+  isBatching(): boolean {
+    return this.batchDepth > 0;
+  }
+
+  markSheetDirty(sheet: Sheet): void {
+    this.batchedSheets.add(sheet);
   }
 }

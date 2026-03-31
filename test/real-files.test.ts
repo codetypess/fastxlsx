@@ -9,6 +9,11 @@ test("task.xlsx exposes stable workbook structure", async () => {
 
   assert.equal(workbook.listEntries().length, 39);
   assert.equal(workbook.getActiveSheet().name, "define");
+  assert.deepEqual(workbook.getSheetNames(), ["define", "conf", "main", "branch", "weekly", "events", "exchange"]);
+  assert.equal(workbook.hasSheet("main"), true);
+  assert.equal(workbook.hasSheet("missing"), false);
+  assert.equal(workbook.tryGetSheet("main")?.name, "main");
+  assert.equal(workbook.tryGetSheet("missing"), null);
   assert.deepEqual(workbook.getDefinedNames(), [
     {
       hidden: true,

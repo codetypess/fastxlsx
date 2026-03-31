@@ -4,6 +4,7 @@ export { validateRoundtripFile } from "./roundtrip.js";
 export { Workbook } from "./workbook.js";
 export type {
   ArchiveEntry,
+  CellError,
   CellBorderColor,
   CellBorderColorPatch,
   CellBorderDefinition,

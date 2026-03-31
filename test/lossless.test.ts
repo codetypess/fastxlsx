@@ -48,6 +48,152 @@ test("editing a styled cell keeps its style index and leaves styles.xml untouche
   assert.equal(stylesXml, originalStyles);
 });
 
+test("workbook supports in-memory byte array open and save flows", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const expectedEntries = await loadFixtureEntries(fixtureDir);
+  const workbook = Workbook.fromEntries(expectedEntries);
+  const zipped = workbook.toUint8Array();
+  const reopened = Workbook.fromUint8Array(zipped);
+
+  assertEntryMapsEqual(toEntryMap(expectedEntries), toEntryMap(reopened.toEntries()));
+
+  reopened.getSheet("Sheet1").setCell("A1", "Bytes");
+  const rewritten = Workbook.fromUint8Array(reopened.toUint8Array());
+
+  assert.equal(rewritten.getSheet("Sheet1").getCell("A1"), "Bytes");
+});
+
+test("workbook supports ArrayBuffer open flows", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const zipped = Workbook.fromEntries(await loadFixtureEntries(fixtureDir)).toUint8Array();
+  const reopened = Workbook.fromArrayBuffer(zipped.buffer.slice(
+    zipped.byteOffset,
+    zipped.byteOffset + zipped.byteLength,
+  ));
+
+  assert.equal(reopened.getActiveSheet().name, "Sheet1");
+  assert.equal(reopened.getSheet("Sheet1").getCell("A1"), "Hello");
+});
+
+test("error cells expose structured error metadata", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="e"><v>#REF!</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const cell = Workbook.fromEntries(entries).getSheet("Sheet1").cell("A1");
+
+  assert.equal(cell.type, "error");
+  assert.equal(cell.value, "#REF!");
+  assert.deepEqual(cell.error, { code: 0x17, text: "#REF!" });
+});
+
+test("formula cells preserve structured error metadata for cached formula errors", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="e"><f>VLOOKUP(B1,C1:D2,2,0)</f><v>#N/A</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const cell = Workbook.fromEntries(entries).getSheet("Sheet1").cell("A1");
+
+  assert.equal(cell.type, "formula");
+  assert.equal(cell.formula, "VLOOKUP(B1,C1:D2,2,0)");
+  assert.equal(cell.value, "#N/A");
+  assert.deepEqual(cell.error, { code: 0x2a, text: "#N/A" });
+});
+
+test("sheet.batch groups multiple edits and flushes the final used range", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const workbook = Workbook.fromEntries(await loadFixtureEntries(fixtureDir));
+  const sheet = workbook.getSheet("Sheet1");
+  const handle = sheet.cell("A1");
+
+  sheet.batch((currentSheet) => {
+    currentSheet.setCell("A1", "Batch");
+    currentSheet.setCell("C3", 99);
+    assert.equal(handle.value, "Batch");
+    assert.equal(currentSheet.getCell("C3"), 99);
+  });
+
+  assert.equal(sheet.getCell("A1"), "Batch");
+  assert.equal(sheet.getCell("C3"), 99);
+  assert.equal(sheet.getRangeRef(), "A1:C3");
+  assert.match(entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml"), /<dimension ref="A1:C3"\/>/);
+});
+
+test("workbook.batch can group edits across multiple sheets", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const workbook = Workbook.fromEntries(
+    withSecondSheet(
+      await loadFixtureEntries(fixtureDir),
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Second</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    ),
+  );
+
+  workbook.batch((currentWorkbook) => {
+    currentWorkbook.getSheet("Sheet1").setCell("B2", "Left");
+    currentWorkbook.getSheet("Sheet2").setCell("B2", "Right");
+  });
+
+  assert.equal(workbook.getSheet("Sheet1").getCell("B2"), "Left");
+  assert.equal(workbook.getSheet("Sheet2").getCell("B2"), "Right");
+  assert.equal(workbook.getSheet("Sheet1").getRangeRef(), "A1:B2");
+  assert.equal(workbook.getSheet("Sheet2").getRangeRef(), "A1:B2");
+});
+
+test("display value helpers expose best-effort user-facing cell text", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const workbook = Workbook.fromEntries(await loadFixtureEntries(fixtureDir));
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", true);
+  sheet.setCell("B1", 42);
+
+  assert.equal(sheet.getDisplayValue("A1"), "TRUE");
+  assert.equal(sheet.getDisplayValue("B1"), "42");
+
+  const errorWorkbook = Workbook.fromEntries(
+    replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="e"><v>#N/A</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    ),
+  ).getSheet("Sheet1");
+
+  assert.equal(errorWorkbook.getDisplayValue("A1"), "#N/A");
+  assert.equal(errorWorkbook.cell("A1").text, "#N/A");
+});
+
 test("workbook parsing accepts single-quoted XML attributes", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = convertEntriesToSingleQuotedAttributes(await loadFixtureEntries(fixtureDir), [
