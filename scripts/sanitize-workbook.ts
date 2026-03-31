@@ -160,10 +160,10 @@ function sanitizeCorePropertiesXml(xml: string): string {
   const replacements: Record<string, string> = {
     "dc:title": "Sanitized Workbook",
     "dc:subject": "Sanitized",
-    "dc:creator": "xlsx-ts",
+    "dc:creator": "fastxlsx",
     "cp:keywords": "sanitized",
     "dc:description": "Sanitized benchmark workbook",
-    "cp:lastModifiedBy": "xlsx-ts",
+    "cp:lastModifiedBy": "fastxlsx",
     "cp:category": "benchmark",
     "cp:contentStatus": "sanitized",
   };

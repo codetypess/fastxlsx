@@ -17,7 +17,7 @@ export async function validateRoundtripFile(
   outputPath?: string,
 ): Promise<RoundtripValidationResult> {
   const resolvedInputPath = resolve(inputPath);
-  const tempRoot = outputPath ? null : await mkdtemp(join(tmpdir(), "xlsx-ts-validate-"));
+  const tempRoot = outputPath ? null : await mkdtemp(join(tmpdir(), "fastxlsx-validate-"));
   const resolvedOutputPath = outputPath
     ? resolve(outputPath)
     : join(tempRoot!, `${basename(resolvedInputPath, ".xlsx")}.roundtrip.xlsx`);

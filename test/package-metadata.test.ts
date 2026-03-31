@@ -20,7 +20,7 @@ test("package metadata exposes JS and type entrypoints for legacy TS resolution"
 
   assert.equal(packageJson.main, "./dist/src/index.js");
   assert.equal(packageJson.types, "./dist/src/index.d.ts");
-  assert.equal(packageJson.bin?.["xlsx-ts"], "./dist/src/cli.js");
+  assert.equal(packageJson.bin?.fastxlsx, "./dist/src/cli.js");
   assert.equal(packageJson.exports?.["."].import, "./dist/src/index.js");
   assert.equal(packageJson.exports?.["."].types, "./dist/src/index.d.ts");
 });
@@ -57,7 +57,7 @@ test("packed tarball exposes runnable entrypoints without stale build artifacts"
     await assertPathExists(join(packageRoot, "dist/src/cli.js"));
 
     const cliResult = runChecked(packageRoot, process.execPath, ["dist/src/cli.js", "--help"]);
-    assert.match(cliResult.stdout, /Usage: xlsx-ts \[options\] \[command\]/);
+    assert.match(cliResult.stdout, /Usage: fastxlsx \[options\] \[command\]/);
 
     runChecked(packageRoot, process.execPath, [
       "--input-type=module",

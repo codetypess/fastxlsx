@@ -1,4 +1,4 @@
-# xlsx-ts
+# fastxlsx
 
 [English README](README.md)
 
@@ -10,26 +10,43 @@
 
 这条底线一旦成立，样式、主题、批注、关系文件、未知扩展节点都能被天然保住。后续再往上叠加单元格、公式、批注、图片等 API，风险会低很多。
 
-## CLI 使用方式
-
-如果是已经发布到 npm 的包，应该通过 `npx` 调用，或者先安装再使用：
+## 安装
 
 ```bash
-npx @codetypess/xlsx-ts inspect path/to/file.xlsx
-npx @codetypess/xlsx-ts get path/to/file.xlsx --sheet Sheet1 --cell B2
+npm i fastxlsx
+```
+
+## CLI 使用方式
+
+如果是已经发布到 npm 的包，可以直接通过 `npx` 调用，或者使用已经安装到项目里的命令：
+
+```bash
+npx fastxlsx inspect path/to/file.xlsx
+npx fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 ```
 
 如果包已经安装到项目里，可以直接使用暴露出来的命令：
 
 ```bash
-npm install @codetypess/xlsx-ts
-npx xlsx-ts inspect path/to/file.xlsx
+npx fastxlsx inspect path/to/file.xlsx
 ```
 
 只有在这个仓库内开发时，才继续使用本地脚本入口：
 
 ```bash
 npm run cli -- inspect path/to/file.xlsx
+```
+
+## 作为库使用
+
+先安装包，再在项目里直接导入：
+
+```bash
+npm i fastxlsx
+```
+
+```ts
+import { Workbook } from "fastxlsx";
 ```
 
 ## 设计思路
@@ -218,6 +235,8 @@ npm run cli -- inspect path/to/file.xlsx
 示例：
 
 ```ts
+import { Workbook } from "fastxlsx";
+
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");

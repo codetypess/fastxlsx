@@ -28,7 +28,7 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
   const program = createProgram({ cwd, stderr, stdout });
 
   try {
-    await program.parseAsync(["node", "xlsx-ts", ...argv], { from: "node" });
+    await program.parseAsync(["node", "fastxlsx", ...argv], { from: "node" });
     return 0;
   } catch (error) {
     if (error instanceof CliExitError) {
@@ -46,7 +46,7 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
 
 function createProgram(io: Required<CliIo>): Command {
   const program = new Command()
-    .name("xlsx-ts")
+    .name("fastxlsx")
     .description("Lossless-first XLSX inspection and editing CLI")
     .showHelpAfterError()
     .configureOutput({

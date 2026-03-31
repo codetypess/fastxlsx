@@ -71,7 +71,7 @@ async function listFiles(directoryPath: string, root = directoryPath): Promise<s
 }
 
 async function getPackPaths(): Promise<string[]> {
-  const cacheDirectory = await mkdtemp(resolve(tmpdir(), "xlsx-ts-npm-cache-"));
+  const cacheDirectory = await mkdtemp(resolve(tmpdir(), "fastxlsx-npm-cache-"));
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, ["pack", "--json", "--dry-run"], {
     cwd: repoRoot,

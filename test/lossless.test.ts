@@ -8,7 +8,7 @@ import { Workbook, type CellEntry } from "../src/index.ts";
 
 test("roundtrip keeps extracted parts identical", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-test-"));
 
   try {
     const inputPath = join(tempRoot, "input.xlsx");
@@ -301,7 +301,7 @@ test("workbook moveSheet tolerates single-quoted sheet and workbookView tags", a
     "docProps/app.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>xlsx-ts</Application>
+  <Application>fastxlsx</Application>
   <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>3</vt:i4></vt:variant></vt:vector></HeadingPairs>
   <TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr><vt:lpstr>Sheet3</vt:lpstr></vt:vector></TitlesOfParts>
 </Properties>`,
@@ -3168,7 +3168,7 @@ test("workbook can add a sheet and wire workbook metadata", async () => {
     "docProps/app.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>xlsx-ts</Application>
+  <Application>fastxlsx</Application>
   <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs>
   <TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr></vt:vector></TitlesOfParts>
 </Properties>`,
@@ -3237,7 +3237,7 @@ test("workbook can delete a sheet and rewrite remaining references", async () =>
     "docProps/app.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>xlsx-ts</Application>
+  <Application>fastxlsx</Application>
   <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>2</vt:i4></vt:variant></vt:vector></HeadingPairs>
   <TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr></vt:vector></TitlesOfParts>
 </Properties>`,
@@ -3307,7 +3307,7 @@ test("workbook can move a sheet and remap local sheet scopes", async () => {
     "docProps/app.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>xlsx-ts</Application>
+  <Application>fastxlsx</Application>
   <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>3</vt:i4></vt:variant></vt:vector></HeadingPairs>
   <TitlesOfParts><vt:vector size="3" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr><vt:lpstr>Sheet3</vt:lpstr></vt:vector></TitlesOfParts>
 </Properties>`,
@@ -3591,7 +3591,7 @@ test("sheet rename updates workbook metadata, formulas, and hyperlink locations"
       "docProps/app.xml",
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>xlsx-ts</Application>
+  <Application>fastxlsx</Application>
   <HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>2</vt:i4></vt:variant></vt:vector></HeadingPairs>
   <TitlesOfParts><vt:vector size="2" baseType="lpstr"><vt:lpstr>Sheet1</vt:lpstr><vt:lpstr>Sheet2</vt:lpstr></vt:vector></TitlesOfParts>
 </Properties>`,

@@ -1,4 +1,4 @@
-# xlsx-ts
+# fastxlsx
 
 [中文 README](README.zh.md)
 
@@ -14,26 +14,43 @@ After that roundtrip, the extracted package parts should stay byte-for-byte iden
 Once that baseline holds, styles, themes, comments, relationship files, and unknown extension nodes are preserved naturally.
 Then higher-level APIs can be added on top with much lower risk.
 
-## CLI Usage
-
-For published npm usage, run the package through `npx` or install it first:
+## Install
 
 ```bash
-npx @codetypess/xlsx-ts inspect path/to/file.xlsx
-npx @codetypess/xlsx-ts get path/to/file.xlsx --sheet Sheet1 --cell B2
+npm i fastxlsx
+```
+
+## CLI Usage
+
+For published npm usage, run the installed binary or invoke it directly with `npx`:
+
+```bash
+npx fastxlsx inspect path/to/file.xlsx
+npx fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 ```
 
 If the package is already installed in a project, use the exposed binary:
 
 ```bash
-npm install @codetypess/xlsx-ts
-npx xlsx-ts inspect path/to/file.xlsx
+npx fastxlsx inspect path/to/file.xlsx
 ```
 
 For repository development only, keep using the local source runner:
 
 ```bash
 npm run cli -- inspect path/to/file.xlsx
+```
+
+## Library Usage
+
+Install the package and import it directly in your project:
+
+```bash
+npm i fastxlsx
+```
+
+```ts
+import { Workbook } from "fastxlsx";
 ```
 
 ## Design
@@ -223,6 +240,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 Example:
 
 ```ts
+import { Workbook } from "fastxlsx";
+
 const workbook = await Workbook.open("input.xlsx");
 const sheet = workbook.getSheet("Sheet1");
 const scoreCell = sheet.cell("B2");

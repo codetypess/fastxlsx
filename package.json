@@ -1,22 +1,22 @@
 {
-  "name": "@codetypess/xlsx-ts",
-  "version": "0.2.6",
+  "name": "fastxlsx",
+  "version": "0.3.0",
   "description": "A lossless-first XLSX reader/writer prototype that preserves styles and untouched package parts.",
   "type": "module",
   "license": "MIT",
   "author": "codetypes",
   "repository": {
     "type": "git",
-    "url": "https://github.com/codetypess/xlsx-ts.git"
+    "url": "https://github.com/codetypess/fastxlsx.git"
   },
-  "homepage": "https://github.com/codetypess/xlsx-ts#readme",
+  "homepage": "https://github.com/codetypess/fastxlsx#readme",
   "bugs": {
-    "url": "https://github.com/codetypess/xlsx-ts/issues"
+    "url": "https://github.com/codetypess/fastxlsx/issues"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "bin": {
-    "xlsx-ts": "./dist/src/cli.js"
+    "fastxlsx": "./dist/src/cli.js"
   },
   "exports": {
     ".": {

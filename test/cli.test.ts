@@ -9,10 +9,10 @@ import { runCli } from "../src/cli.ts";
 import { Workbook } from "../src/index.ts";
 
 test("symlinked CLI entry prints help output", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
-    const symlinkPath = join(tempRoot, "xlsx-ts");
+    const symlinkPath = join(tempRoot, "fastxlsx");
     await symlink(resolve("src/cli.ts"), symlinkPath);
 
     const result = spawnSync(process.execPath, ["--import", "tsx", symlinkPath, "--help"], {
@@ -20,7 +20,7 @@ test("symlinked CLI entry prints help output", async () => {
     });
 
     assert.equal(result.status, 0);
-    assert.match(result.stdout, /Usage: xlsx-ts \[options\] \[command\]/);
+    assert.match(result.stdout, /Usage: fastxlsx \[options\] \[command\]/);
     assert.match(result.stdout, /display help for command/);
     assert.equal(result.stderr, "");
   } finally {
@@ -29,7 +29,7 @@ test("symlinked CLI entry prints help output", async () => {
 });
 
 test("inspect reports workbook structure as JSON", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -58,7 +58,7 @@ test("inspect reports workbook structure as JSON", async () => {
 });
 
 test("set writes a cell value to a new workbook and preserves the style id", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -93,7 +93,7 @@ test("set writes a cell value to a new workbook and preserves the style id", asy
 });
 
 test("add-sheet creates a new worksheet through the direct CLI command", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -123,7 +123,7 @@ test("add-sheet creates a new worksheet through the direct CLI command", async (
 });
 
 test("rename-sheet and delete-sheet manage worksheets through direct commands", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -174,7 +174,7 @@ test("rename-sheet and delete-sheet manage worksheets through direct commands", 
 });
 
 test("record commands manage header-based sheet data through the CLI", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -249,7 +249,7 @@ test("record commands manage header-based sheet data through the CLI", async () 
 });
 
 test("config-table command group supports high-level config workflows", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -371,7 +371,7 @@ test("config-table command group supports high-level config workflows", async ()
 });
 
 test("config-table sync imports JSON config objects in replace and upsert modes", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -459,7 +459,7 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
 });
 
 test("table command group respects explicit data row boundaries", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeStructuredTableWorkbook(tempRoot);
@@ -583,7 +583,7 @@ test("table command group respects explicit data row boundaries", async () => {
 });
 
 test("table command group supports profile presets for structured sheets", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeStructuredTableWorkbook(tempRoot);
@@ -667,7 +667,7 @@ test("table command group supports profile presets for structured sheets", async
 });
 
 test("explicit table options override profile values", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeStructuredTableWorkbook(tempRoot);
@@ -716,7 +716,7 @@ test("explicit table options override profile values", async () => {
 });
 
 test("table command group supports composite key profiles", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeCompositeStructuredTableWorkbook(tempRoot);
@@ -801,7 +801,7 @@ test("table command group supports composite key profiles", async () => {
 });
 
 test("table generate-profiles scans full workbooks and supports multiple xlsx inputs", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeProfileGenerationWorkbook(tempRoot);
@@ -856,7 +856,7 @@ test("table generate-profiles scans full workbooks and supports multiple xlsx in
 });
 
 test("table generate-profiles infers composite keys from key1/key2 headers", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeCompositeStructuredTableWorkbook(tempRoot);
@@ -881,7 +881,7 @@ test("table generate-profiles infers composite keys from key1/key2 headers", asy
 });
 
 test("table generate-profiles filters sheets by regular expression", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeProfileGenerationWorkbook(tempRoot);
@@ -916,7 +916,7 @@ test("table generate-profiles filters sheets by regular expression", async () =>
 });
 
 test("style commands update formatting and can copy styles through the CLI", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -993,7 +993,7 @@ test("style commands update formatting and can copy styles through the CLI", asy
 });
 
 test("apply executes structured workbook operations", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -1042,7 +1042,7 @@ test("apply executes structured workbook operations", async () => {
 });
 
 test("apply supports worksheet and style operations", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -1090,7 +1090,7 @@ test("apply supports worksheet and style operations", async () => {
 });
 
 test("apply supports record and header operations", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
@@ -1132,7 +1132,7 @@ test("apply supports record and header operations", async () => {
 });
 
 test("validate returns a successful roundtrip result for the fixture workbook", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "xlsx-ts-cli-test-"));
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = await writeFixtureWorkbook(tempRoot);
