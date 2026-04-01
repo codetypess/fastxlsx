@@ -41,6 +41,21 @@ export function registerWorkbookCommands(
   io: CliCommandIo,
 ): void {
   program
+    .command("create")
+    .argument("<file>", "output xlsx file")
+    .option("--sheet <name>", "initial sheet name", "Sheet1")
+    .action(async (file: string, options: { sheet: string }) => {
+      const outputPath = resolveFrom(io.cwd, file);
+      const workbook = Workbook.create(options.sheet);
+      await workbook.save(outputPath);
+      writeJson(io.stdout, {
+        action: "createWorkbook",
+        output: outputPath,
+        sheets: workbook.getSheets().map((sheet) => sheet.name),
+      });
+    });
+
+  program
     .command("inspect")
     .argument("<file>", "input xlsx file")
     .option("--header-row <row>", "header row used for the sheet preview", parsePositiveInteger, 1)

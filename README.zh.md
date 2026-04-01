@@ -21,6 +21,7 @@ npm i fastxlsx
 如果是已经发布到 npm 的包，可以直接通过 `npx` 调用，或者使用已经安装到项目里的命令：
 
 ```bash
+npx fastxlsx create path/to/new.xlsx --sheet Sheet1
 npx fastxlsx inspect path/to/file.xlsx
 npx fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 ```
@@ -34,6 +35,7 @@ npx fastxlsx inspect path/to/file.xlsx
 只有在这个仓库内开发时，才继续使用本地脚本入口：
 
 ```bash
+npm run cli -- create path/to/new.xlsx --sheet Sheet1
 npm run cli -- inspect path/to/file.xlsx
 ```
 
@@ -50,6 +52,16 @@ import { Workbook } from "fastxlsx";
 ```
 
 ## 快速开始
+
+```ts
+import { Workbook } from "fastxlsx";
+
+const workbook = Workbook.create("Sheet1");
+workbook.getSheet("Sheet1").setCell("A1", "Hello");
+await workbook.save("new.xlsx");
+```
+
+从零创建后，再编辑已有 workbook：
 
 ```ts
 import { Workbook } from "fastxlsx";
@@ -150,6 +162,7 @@ workbook.batch((currentWorkbook) => {
 ## 当前能力
 
 - `Workbook.open(path)`
+- `Workbook.create(sheetName?)`
 - `Workbook.fromEntries(entries)`
 - `Workbook.fromUint8Array(data)`
 - `Workbook.fromArrayBuffer(data)`

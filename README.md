@@ -25,6 +25,7 @@ npm i fastxlsx
 For published npm usage, run the installed binary or invoke it directly with `npx`:
 
 ```bash
+npx fastxlsx create path/to/new.xlsx --sheet Sheet1
 npx fastxlsx inspect path/to/file.xlsx
 npx fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 ```
@@ -38,6 +39,7 @@ npx fastxlsx inspect path/to/file.xlsx
 For repository development only, keep using the local source runner:
 
 ```bash
+npm run cli -- create path/to/new.xlsx --sheet Sheet1
 npm run cli -- inspect path/to/file.xlsx
 ```
 
@@ -54,6 +56,16 @@ import { Workbook } from "fastxlsx";
 ```
 
 ## Quick Start
+
+```ts
+import { Workbook } from "fastxlsx";
+
+const workbook = Workbook.create("Sheet1");
+workbook.getSheet("Sheet1").setCell("A1", "Hello");
+await workbook.save("new.xlsx");
+```
+
+Create from scratch, then edit an existing workbook:
 
 ```ts
 import { Workbook } from "fastxlsx";
@@ -155,6 +167,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 ## Current API
 
 - `Workbook.open(path)`
+- `Workbook.create(sheetName?)`
 - `Workbook.fromEntries(entries)`
 - `Workbook.fromUint8Array(data)`
 - `Workbook.fromArrayBuffer(data)`

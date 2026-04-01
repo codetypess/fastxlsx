@@ -121,6 +121,7 @@ import {
   type ParsedFont,
   type StylesCache,
 } from "./workbook/workbook-styles-parse.js";
+import { buildWorkbookTemplateEntries } from "./workbook/workbook-template.js";
 import { replaceXmlTagSource } from "./workbook/workbook-xml.js";
 import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook/workbook-context.js";
@@ -241,6 +242,14 @@ export class Workbook {
    */
   static fromEntries(entries: Iterable<ArchiveEntry>): Workbook {
     return new Workbook(entries);
+  }
+
+  /**
+   * Creates a new workbook from a minimal built-in template.
+   */
+  static create(sheetName = "Sheet1"): Workbook {
+    assertSheetName(sheetName);
+    return new Workbook(buildWorkbookTemplateEntries(sheetName));
   }
 
   /**

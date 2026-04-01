@@ -57,6 +57,39 @@ test("inspect reports workbook structure as JSON", async () => {
   }
 });
 
+test("create builds a new workbook through the direct CLI command", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const outputPath = join(tempRoot, "created.xlsx");
+    const result = await runCliCapture([
+      "create",
+      outputPath,
+      "--sheet",
+      "Config",
+    ]);
+
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.output, outputPath);
+    assert.deepEqual(payload.sheets, ["Config"]);
+
+    const workbook = await Workbook.open(outputPath);
+    const sheet = workbook.getSheet("Config");
+    assert.deepEqual(workbook.getSheetNames(), ["Config"]);
+    assert.equal(workbook.getActiveSheet().name, "Config");
+    assert.equal(sheet.rowCount, 0);
+    assert.equal(sheet.columnCount, 0);
+
+    const validation = await runCliCapture(["validate", outputPath]);
+    assert.equal(validation.exitCode, 0);
+    assert.equal(JSON.parse(validation.stdout).ok, true);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("set writes a cell value to a new workbook and preserves the style id", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 

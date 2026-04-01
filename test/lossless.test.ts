@@ -63,6 +63,26 @@ test("workbook supports in-memory byte array open and save flows", async () => {
   assert.equal(rewritten.getSheet("Sheet1").getCell("A1"), "Bytes");
 });
 
+test("workbook can create a new workbook from a built-in template", async () => {
+  const workbook = Workbook.create("Config");
+  const sheet = workbook.getSheet("Config");
+
+  assert.deepEqual(workbook.getSheetNames(), ["Config"]);
+  assert.equal(workbook.getActiveSheet().name, "Config");
+  assert.equal(sheet.rowCount, 0);
+  assert.equal(sheet.columnCount, 0);
+
+  sheet.setCell("A1", "Hello");
+  workbook.addSheet("Meta");
+
+  assert.equal(sheet.getCell("A1"), "Hello");
+  assert.deepEqual(workbook.getSheetNames(), ["Config", "Meta"]);
+  assert.match(
+    entryText(workbook.toEntries(), "docProps/app.xml"),
+    /<vt:lpstr>Config<\/vt:lpstr><vt:lpstr>Meta<\/vt:lpstr>/,
+  );
+});
+
 test("workbook supports ArrayBuffer open flows", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const zipped = Workbook.fromEntries(await loadFixtureEntries(fixtureDir)).toUint8Array();
