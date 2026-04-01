@@ -21,6 +21,7 @@ import type {
   SetFormulaOptions,
   SetHyperlinkOptions,
   SheetSelection,
+  SheetPrintTitles,
 } from "./types.js";
 import { XlsxError } from "./errors.js";
 import {
@@ -134,6 +135,7 @@ import {
   transformRowXml,
   transformWorksheetStructureReferences,
 } from "./sheet/sheet-structure.js";
+import { formatSheetNameForReference } from "./workbook/workbook-sheet-package.js";
 import {
   buildFormulaCellXml,
   buildStyledCellXml,
@@ -955,6 +957,132 @@ export class Sheet {
   getRecordBy(field: string, value: CellValue, headerRowNumber = 1): Record<string, CellValue> | null {
     const rowNumber = this.findRecordRow(field, value, headerRowNumber);
     return rowNumber === null ? null : this.getRecord(rowNumber, headerRowNumber);
+  }
+
+  /**
+   * Exports header-mapped records as JSON-ready objects.
+   */
+  toJson(headerRowNumber = 1): Array<Record<string, CellValue>> {
+    return this.getRecords(headerRowNumber).map((record) => ({ ...record }));
+  }
+
+  /**
+   * Replaces the current record set from JSON-ready objects.
+   */
+  fromJson(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
+    this.setRecords(records, headerRowNumber);
+  }
+
+  /**
+   * Exports header-mapped records as CSV text.
+   */
+  toCsv(headerRowNumber = 1): string {
+    const headers = trimTrailingEmptyHeaderNames(this.getHeaders(headerRowNumber));
+    if (headers.length === 0) {
+      return "";
+    }
+
+    const rows = [
+      headers,
+      ...this.getRecords(headerRowNumber).map((record) => headers.map((header) => formatCsvCellValue(record[header] ?? null))),
+    ];
+
+    return rows.map((row) => row.map((value) => escapeCsvField(value)).join(",")).join("\n");
+  }
+
+  /**
+   * Replaces the current record set from CSV text using the first row as headers.
+   */
+  fromCsv(csv: string, headerRowNumber = 1): void {
+    const rows = parseCsvRows(csv);
+    if (rows.length === 0) {
+      return;
+    }
+
+    const headers = rows[0]!.map((value) => value.trim());
+    const records = rows.slice(1).map((row) => {
+      const record: Record<string, CellValue> = {};
+
+      for (let index = 0; index < headers.length; index += 1) {
+        const header = headers[index];
+        if (!header) {
+          continue;
+        }
+
+        record[header] = parseCsvCellValue(row[index] ?? "");
+      }
+
+      return record;
+    });
+
+    this.setHeaders(headers, headerRowNumber);
+    this.setRecords(records, headerRowNumber);
+  }
+
+  /**
+   * Reads the local print area defined name for this sheet.
+   */
+  getPrintArea(): string | null {
+    return this.workbook.getDefinedName("_xlnm.Print_Area", this.name);
+  }
+
+  /**
+   * Creates or removes the local print area defined name for this sheet.
+   */
+  setPrintArea(range: string | null): void {
+    if (range === null) {
+      this.workbook.deleteDefinedName("_xlnm.Print_Area", this.name);
+      return;
+    }
+
+    this.workbook.setDefinedName("_xlnm.Print_Area", normalizeRangeRef(range), { scope: this.name });
+  }
+
+  /**
+   * Reads the row and column print-title references for this sheet.
+   */
+  getPrintTitles(): SheetPrintTitles {
+    const value = this.workbook.getDefinedName("_xlnm.Print_Titles", this.name);
+    if (!value) {
+      return { columns: null, rows: null };
+    }
+
+    const titles: SheetPrintTitles = { columns: null, rows: null };
+    for (const part of splitPrintTitleParts(value)) {
+      const bangIndex = part.indexOf("!");
+      const reference = bangIndex === -1 ? part : part.slice(bangIndex + 1);
+
+      if (isPrintTitleRowRef(reference)) {
+        titles.rows = normalizePrintTitleRowRef(reference);
+      } else if (isPrintTitleColumnRef(reference)) {
+        titles.columns = normalizePrintTitleColumnRef(reference);
+      }
+    }
+
+    return titles;
+  }
+
+  /**
+   * Creates, replaces, or removes the local print titles defined name for this sheet.
+   */
+  setPrintTitles(options: { columns?: string | null; rows?: string | null }): void {
+    const rows = options.rows === undefined ? this.getPrintTitles().rows : options.rows;
+    const columns = options.columns === undefined ? this.getPrintTitles().columns : options.columns;
+    const references: string[] = [];
+
+    if (rows !== null && rows !== undefined) {
+      references.push(`${formatSheetNameForReference(this.name)}!${normalizePrintTitleRowRef(rows)}`);
+    }
+    if (columns !== null && columns !== undefined) {
+      references.push(`${formatSheetNameForReference(this.name)}!${normalizePrintTitleColumnRef(columns)}`);
+    }
+
+    if (references.length === 0) {
+      this.workbook.deleteDefinedName("_xlnm.Print_Titles", this.name);
+      return;
+    }
+
+    this.workbook.setDefinedName("_xlnm.Print_Titles", references.join(","), { scope: this.name });
   }
 
   /**
@@ -2594,6 +2722,185 @@ function assertOptionalWorksheetSize(value: number | null, label: string): void 
   if (!Number.isFinite(value) || value <= 0) {
     throw new XlsxError(`Invalid ${label}: ${value}`);
   }
+}
+
+function trimTrailingEmptyHeaderNames(headers: string[]): string[] {
+  let end = headers.length;
+
+  while (end > 0 && headers[end - 1] === "") {
+    end -= 1;
+  }
+
+  return headers.slice(0, end);
+}
+
+function formatCsvCellValue(value: CellValue): string {
+  if (value === null) {
+    return "";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+
+  return String(value);
+}
+
+function parseCsvCellValue(value: string): CellValue {
+  if (value.length === 0) {
+    return null;
+  }
+
+  if (value === "TRUE") {
+    return true;
+  }
+  if (value === "FALSE") {
+    return false;
+  }
+
+  const numericValue = Number(value);
+  if (value.trim() !== "" && Number.isFinite(numericValue)) {
+    return numericValue;
+  }
+
+  return value;
+}
+
+function escapeCsvField(value: string): string {
+  if (!/[",\n\r]/.test(value)) {
+    return value;
+  }
+
+  return `"${value.replaceAll("\"", "\"\"")}"`;
+}
+
+function parseCsvRows(csv: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentValue = "";
+  let index = 0;
+  let inQuotes = false;
+
+  while (index < csv.length) {
+    const character = csv[index]!;
+
+    if (inQuotes) {
+      if (character === "\"") {
+        if (csv[index + 1] === "\"") {
+          currentValue += "\"";
+          index += 2;
+          continue;
+        }
+
+        inQuotes = false;
+        index += 1;
+        continue;
+      }
+
+      currentValue += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === "\"") {
+      inQuotes = true;
+      index += 1;
+      continue;
+    }
+    if (character === ",") {
+      currentRow.push(currentValue);
+      currentValue = "";
+      index += 1;
+      continue;
+    }
+    if (character === "\n") {
+      currentRow.push(currentValue);
+      rows.push(currentRow);
+      currentRow = [];
+      currentValue = "";
+      index += 1;
+      continue;
+    }
+    if (character === "\r") {
+      index += 1;
+      continue;
+    }
+
+    currentValue += character;
+    index += 1;
+  }
+
+  if (inQuotes) {
+    throw new XlsxError("Invalid CSV: unterminated quoted field");
+  }
+
+  if (currentValue.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentValue);
+    rows.push(currentRow);
+  }
+
+  return rows;
+}
+
+function splitPrintTitleParts(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === "'") {
+      if (inQuotes && value[index + 1] === "'") {
+        current += "''";
+        index += 1;
+        continue;
+      }
+
+      inQuotes = !inQuotes;
+      current += character;
+      continue;
+    }
+
+    if (character === "," && !inQuotes) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (current.length > 0) {
+    parts.push(current);
+  }
+
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function isPrintTitleRowRef(value: string): boolean {
+  return /^\$?\d+:\$?\d+$/.test(value);
+}
+
+function isPrintTitleColumnRef(value: string): boolean {
+  return /^\$?[A-Z]+:\$?[A-Z]+$/i.test(value);
+}
+
+function normalizePrintTitleRowRef(value: string): string {
+  const match = value.match(/^\$?(\d+):\$?(\d+)$/);
+  if (!match) {
+    throw new XlsxError(`Invalid print title row reference: ${value}`);
+  }
+
+  return `$${match[1]}:$${match[2]}`;
+}
+
+function normalizePrintTitleColumnRef(value: string): string {
+  const match = value.toUpperCase().match(/^\$?([A-Z]+):\$?([A-Z]+)$/);
+  if (!match) {
+    throw new XlsxError(`Invalid print title column reference: ${value}`);
+  }
+
+  return `$${match[1]}:$${match[2]}`;
 }
 
 function buildFormulaCellSnapshot(

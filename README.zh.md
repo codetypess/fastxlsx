@@ -74,6 +74,17 @@ const workbook = Workbook.create({
 });
 ```
 
+以 JSON / CSV 导入导出记录：
+
+```ts
+const sheet = workbook.getSheet("Data");
+
+sheet.fromJson([{ id: 1001, name: "Alpha" }]);
+const records = sheet.toJson();
+const csv = sheet.toCsv();
+sheet.fromCsv(csv);
+```
+
 从零创建后，再编辑已有 workbook：
 
 ```ts
@@ -280,6 +291,8 @@ workbook.batch((currentWorkbook) => {
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecordBy(field, value, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
+- `sheet.toJson(headerRowNumber?)`
+- `sheet.toCsv(headerRowNumber?)`
 - `sheet.getColumn(column)`
 - `sheet.getColumnEntries(column)`
 - `sheet.getPhysicalColumnEntries(column)`
@@ -296,11 +309,15 @@ workbook.batch((currentWorkbook) => {
 - `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
+- `sheet.getPrintArea()`
+- `sheet.getPrintTitles()`
 - `sheet.addTable(range, options?)`
 - `sheet.removeTable(name)`
 - `sheet.setHyperlink(address, target, options?)`
 - `sheet.removeHyperlink(address)`
 - `sheet.setAutoFilter(range)`
+- `sheet.setPrintArea(range)`
+- `sheet.setPrintTitles(options)`
 - `sheet.freezePane(columnCount, rowCount?)`
 - `sheet.unfreezePane()`
 - `sheet.setSelection(activeCell, range?)`
@@ -328,6 +345,8 @@ workbook.batch((currentWorkbook) => {
 - `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
 - `sheet.setRecord(rowNumber, record, headerRowNumber?)`
 - `sheet.setRecords(records, headerRowNumber?)`
+- `sheet.fromJson(records, headerRowNumber?)`
+- `sheet.fromCsv(csv, headerRowNumber?)`
 - `sheet.upsertRecord(field, record, headerRowNumber?)`
 - `sheet.deleteRecord(rowNumber, headerRowNumber?)`
 - `sheet.deleteRecords(rowNumbers, headerRowNumber?)`

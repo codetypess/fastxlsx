@@ -313,6 +313,11 @@ export interface SheetSelection {
   pane: "bottomLeft" | "topRight" | "bottomRight" | null;
 }
 
+export interface SheetPrintTitles {
+  columns: string | null;
+  rows: string | null;
+}
+
 export interface DataValidation {
   range: string;
   type: string | null;

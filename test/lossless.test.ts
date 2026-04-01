@@ -3406,6 +3406,40 @@ test("record key APIs can get, upsert, and delete by field", async () => {
   ]);
 });
 
+test("sheet JSON helpers roundtrip header-mapped records", async () => {
+  const workbook = Workbook.create("Data");
+  const sheet = workbook.getSheet("Data");
+
+  sheet.fromJson([
+    { id: 1001, name: "Alpha", enabled: true },
+    { id: 1002, name: "Beta", enabled: false },
+  ]);
+
+  assert.deepEqual(sheet.getHeaders(), ["id", "name", "enabled"]);
+  assert.deepEqual(sheet.toJson(), [
+    { id: 1001, name: "Alpha", enabled: true },
+    { id: 1002, name: "Beta", enabled: false },
+  ]);
+});
+
+test("sheet CSV helpers import and export header-mapped records", async () => {
+  const workbook = Workbook.create("Data");
+  const sheet = workbook.getSheet("Data");
+
+  sheet.fromCsv('id,name,notes\n1001,Alpha,"A, B"\n1002,Beta,"line 1\nline 2"');
+
+  assert.deepEqual(sheet.getHeaders(), ["id", "name", "notes"]);
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha", notes: "A, B" },
+    { id: 1002, name: "Beta", notes: "line 1\nline 2" },
+  ]);
+
+  assert.equal(
+    sheet.toCsv(),
+    'id,name,notes\n1001,Alpha,"A, B"\n1002,Beta,"line 1\nline 2"',
+  );
+});
+
 test("record APIs can delete a record row", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);
@@ -4423,6 +4457,36 @@ test("workbook defined name APIs read, write, and delete global and local names"
   assert.deepEqual(workbook.getDefinedNames(), [
     { hidden: false, name: "NewLocal", scope: "Sheet1", value: "$D$4" },
   ]);
+});
+
+test("sheet print area and print titles APIs manage local defined names", async () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getPrintArea(), null);
+  assert.deepEqual(sheet.getPrintTitles(), { columns: null, rows: null });
+
+  sheet.setPrintArea("A1:C4");
+  sheet.setPrintTitles({ rows: "1:2", columns: "A:B" });
+
+  assert.equal(sheet.getPrintArea(), "A1:C4");
+  assert.deepEqual(sheet.getPrintTitles(), { columns: "$A:$B", rows: "$1:$2" });
+  assert.equal(workbook.getDefinedName("_xlnm.Print_Area", "Sheet1"), "A1:C4");
+  assert.equal(
+    workbook.getDefinedName("_xlnm.Print_Titles", "Sheet1"),
+    "Sheet1!$1:$2,Sheet1!$A:$B",
+  );
+
+  sheet.setPrintTitles({ rows: null });
+  assert.deepEqual(sheet.getPrintTitles(), { columns: "$A:$B", rows: null });
+  assert.equal(workbook.getDefinedName("_xlnm.Print_Titles", "Sheet1"), "Sheet1!$A:$B");
+
+  sheet.setPrintArea(null);
+  sheet.setPrintTitles({ columns: null });
+  assert.equal(sheet.getPrintArea(), null);
+  assert.deepEqual(sheet.getPrintTitles(), { columns: null, rows: null });
+  assert.equal(workbook.getDefinedName("_xlnm.Print_Area", "Sheet1"), null);
+  assert.equal(workbook.getDefinedName("_xlnm.Print_Titles", "Sheet1"), null);
 });
 
 test("deleting the last defined name removes the definedNames container", async () => {

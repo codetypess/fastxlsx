@@ -78,6 +78,17 @@ const workbook = Workbook.create({
 });
 ```
 
+Import and export records as JSON / CSV:
+
+```ts
+const sheet = workbook.getSheet("Data");
+
+sheet.fromJson([{ id: 1001, name: "Alpha" }]);
+const records = sheet.toJson();
+const csv = sheet.toCsv();
+sheet.fromCsv(csv);
+```
+
 Create from scratch, then edit an existing workbook:
 
 ```ts
@@ -285,6 +296,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getRecord(rowNumber, headerRowNumber?)`
 - `sheet.getRecordBy(field, value, headerRowNumber?)`
 - `sheet.getRecords(headerRowNumber?)`
+- `sheet.toJson(headerRowNumber?)`
+- `sheet.toCsv(headerRowNumber?)`
 - `sheet.getColumn(column)`
 - `sheet.getColumnEntries(column)`
 - `sheet.getPhysicalColumnEntries(column)`
@@ -301,11 +314,15 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getDataValidations()`
 - `sheet.getTables()`
 - `sheet.getHyperlinks()`
+- `sheet.getPrintArea()`
+- `sheet.getPrintTitles()`
 - `sheet.addTable(range, options?)`
 - `sheet.removeTable(name)`
 - `sheet.setHyperlink(address, target, options?)`
 - `sheet.removeHyperlink(address)`
 - `sheet.setAutoFilter(range)`
+- `sheet.setPrintArea(range)`
+- `sheet.setPrintTitles(options)`
 - `sheet.freezePane(columnCount, rowCount?)`
 - `sheet.unfreezePane()`
 - `sheet.setSelection(activeCell, range?)`
@@ -333,6 +350,8 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
 - `sheet.setRecord(rowNumber, record, headerRowNumber?)`
 - `sheet.setRecords(records, headerRowNumber?)`
+- `sheet.fromJson(records, headerRowNumber?)`
+- `sheet.fromCsv(csv, headerRowNumber?)`
 - `sheet.upsertRecord(field, record, headerRowNumber?)`
 - `sheet.deleteRecord(rowNumber, headerRowNumber?)`
 - `sheet.deleteRecords(rowNumbers, headerRowNumber?)`

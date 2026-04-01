@@ -44,6 +44,7 @@ export type {
   SetFormulaOptions,
   SetHyperlinkOptions,
   SheetSelection,
+  SheetPrintTitles,
   SheetVisibility,
   WorkbookCreateOptions,
   WorkbookCreateSheetOptions,
