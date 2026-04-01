@@ -3476,6 +3476,71 @@ test("sheet CSV helpers import and export header-mapped records", async () => {
   );
 });
 
+test("sheet record workflow APIs import, export, and sync records", async () => {
+  const workbook = Workbook.create("Data");
+  const sheet = workbook.getSheet("Data");
+
+  sheet.importRecords([
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta" },
+  ]);
+
+  assert.deepEqual(sheet.exportRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta" },
+  ]);
+  assert.equal(sheet.exportRecords({ format: "csv" }), "id,name\n1001,Alpha\n1002,Beta");
+
+  sheet.importRecords([{ id: 1003, name: "Gamma" }], { mode: "append" });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta" },
+    { id: 1003, name: "Gamma" },
+  ]);
+
+  sheet.syncRecords(
+    [
+      { id: 1002, name: "Beta-2" },
+      { id: 1004, name: "Delta" },
+    ],
+    { keyField: "id" },
+  );
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta-2" },
+    { id: 1003, name: "Gamma" },
+    { id: 1004, name: "Delta" },
+  ]);
+});
+
+test("workbook can create config and table sheets through workflow helpers", async () => {
+  const workbook = Workbook.create("Root");
+
+  workbook.createConfigSheet("Config", {
+    records: [
+      { Key: "timeout", Value: "30" },
+      { Key: "region", Value: "cn" },
+    ],
+  });
+  workbook.createTableSheet("Data", {
+    records: [
+      { id: 1001, name: "Alpha" },
+      { id: 1002, name: "Beta" },
+    ],
+  });
+
+  assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value"]);
+  assert.deepEqual(workbook.getSheet("Config").getRecords(), [
+    { Key: "timeout", Value: "30" },
+    { Key: "region", Value: "cn" },
+  ]);
+  assert.deepEqual(workbook.getSheet("Data").getHeaders(), ["id", "name"]);
+  assert.deepEqual(workbook.getSheet("Data").getRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta" },
+  ]);
+});
+
 test("record APIs can delete a record row", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);

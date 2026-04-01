@@ -384,6 +384,23 @@ export interface WorkbookCreateOptions {
   sheets?: Array<string | WorkbookCreateSheetOptions>;
 }
 
+export interface CreateTableSheetOptions {
+  headerRow?: number;
+  headers?: string[];
+  records?: Array<Record<string, CellValue>>;
+}
+
+export interface SheetExportRecordsOptions {
+  format?: "csv" | "json";
+  headerRow?: number;
+}
+
+export interface SheetImportRecordsOptions {
+  headerRow?: number;
+  keyField?: string;
+  mode?: "append" | "replace" | "upsert";
+}
+
 export interface SetHyperlinkOptions {
   text?: string;
   tooltip?: string;

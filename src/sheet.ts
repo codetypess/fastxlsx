@@ -14,6 +14,8 @@ import type {
   CellStyleDefinition,
   CellStylePatch,
   CellValue,
+  SheetExportRecordsOptions,
+  SheetImportRecordsOptions,
   DataValidation,
   FreezePane,
   Hyperlink,
@@ -1040,6 +1042,54 @@ export class Sheet {
 
     this.setHeaders(headers, headerRowNumber);
     this.setRecords(records, headerRowNumber);
+  }
+
+  /**
+   * Exports records in the requested format.
+   */
+  exportRecords(options: SheetExportRecordsOptions = {}): Array<Record<string, CellValue>> | string {
+    const headerRow = options.headerRow ?? 1;
+    const format = options.format ?? "json";
+    return format === "csv" ? this.toCsv(headerRow) : this.toJson(headerRow);
+  }
+
+  /**
+   * Imports records with a higher-level workflow mode.
+   */
+  importRecords(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions = {}): void {
+    const headerRow = options.headerRow ?? 1;
+    const mode = options.mode ?? "replace";
+
+    if (mode === "replace") {
+      this.fromJson(records, headerRow);
+      return;
+    }
+
+    if (mode === "append") {
+      this.addRecords(records, headerRow);
+      return;
+    }
+
+    const keyField = options.keyField;
+    if (!keyField) {
+      throw new XlsxError("importRecords with mode=upsert requires keyField");
+    }
+
+    this.batch((currentSheet) => {
+      for (const record of records) {
+        currentSheet.upsertRecord(keyField, record, headerRow);
+      }
+    });
+  }
+
+  /**
+   * Synchronizes records with replace or upsert semantics.
+   */
+  syncRecords(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions = {}): void {
+    this.importRecords(records, {
+      ...options,
+      mode: options.mode ?? (options.keyField ? "upsert" : "replace"),
+    });
   }
 
   /**

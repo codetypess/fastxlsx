@@ -19,6 +19,8 @@ import type {
   CellStyleAlignmentPatch,
   CellStyleDefinition,
   CellStylePatch,
+  CellValue,
+  CreateTableSheetOptions,
   DefinedName,
   SetDefinedNameOptions,
   SheetVisibility,
@@ -355,6 +357,50 @@ export class Workbook {
    */
   listEntries(): string[] {
     return [...this.entryOrder];
+  }
+
+  /**
+   * Adds a sheet intended for simple key-value config records.
+   */
+  createConfigSheet(
+    sheetName: string,
+    options: {
+      headerRow?: number;
+      headers?: string[];
+      records?: Array<Record<string, CellValue>>;
+    } = {},
+  ): Sheet {
+    const sheet = this.addSheet(sheetName);
+    const headerRow = options.headerRow ?? 1;
+    const headers = options.headers ?? ["Key", "Value"];
+
+    sheet.setHeaders(headers, headerRow);
+    if (options.records && options.records.length > 0) {
+      sheet.addRecords(options.records, headerRow);
+    }
+
+    return sheet;
+  }
+
+  /**
+   * Adds a sheet intended for table-like record workflows.
+   */
+  createTableSheet(sheetName: string, options: CreateTableSheetOptions = {}): Sheet {
+    const sheet = this.addSheet(sheetName);
+    const headerRow = options.headerRow ?? 1;
+
+    if (options.headers && options.headers.length > 0) {
+      sheet.setHeaders(options.headers, headerRow);
+    }
+
+    if (options.records && options.records.length > 0) {
+      sheet.importRecords(options.records, {
+        headerRow,
+        mode: options.headers && options.headers.length > 0 ? "append" : "replace",
+      });
+    }
+
+    return sheet;
   }
 
   /**
