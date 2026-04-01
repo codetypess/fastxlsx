@@ -89,12 +89,29 @@ test("workbook can create a configured workbook from options", async () => {
     author: "Alice",
     modifiedBy: "Bob",
     sheets: [
-      { name: "Config", headers: ["Key", "Value"] },
+      {
+        name: "Config",
+        headers: ["Key", "Value"],
+        headerStyle: {
+          applyAlignment: true,
+          alignment: { horizontal: "center" },
+        },
+        columnWidths: { A: 20, B: 30 },
+        rowHeights: { "1": 24 },
+        comments: [{ address: "A1", author: "Alice", text: "Config header" }],
+      },
       {
         name: "Data",
         records: [
           { id: 1001, name: "Alpha" },
           { id: 1002, name: "Beta" },
+        ],
+        frozenPane: { columnCount: 1, rowCount: 1 },
+        printArea: "A1:B3",
+        printTitles: { rows: "1:1" },
+        rangeStyles: [
+          { range: "A2:B3", backgroundColor: "FFFFF2CC" },
+          { range: "A2:A3", numberFormat: "0" },
         ],
       },
       { name: "Hidden", visibility: "hidden" },
@@ -109,6 +126,25 @@ test("workbook can create a configured workbook from options", async () => {
     { id: 1001, name: "Alpha" },
     { id: 1002, name: "Beta" },
   ]);
+  assert.equal(workbook.getSheet("Config").getColumnWidth("A"), 20);
+  assert.equal(workbook.getSheet("Config").getColumnWidth("B"), 30);
+  assert.equal(workbook.getSheet("Config").getRowHeight(1), 24);
+  assert.deepEqual(workbook.getSheet("Config").getComment("A1"), {
+    address: "A1",
+    author: "Alice",
+    text: "Config header",
+  });
+  assert.deepEqual(workbook.getSheet("Data").getFreezePane(), {
+    activePane: "bottomRight",
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+  });
+  assert.equal(workbook.getSheet("Data").getPrintArea(), "A1:B3");
+  assert.deepEqual(workbook.getSheet("Data").getPrintTitles(), { columns: null, rows: "$1:$1" });
+  assert.equal(workbook.getSheet("Data").getBackgroundColor("B3"), "FFFFF2CC");
+  assert.equal(workbook.getSheet("Data").getNumberFormat("A2")?.code, "0");
+  assert.deepEqual(workbook.getSheet("Config").getAlignment("A1"), { horizontal: "center" });
 
   const coreXml = entryText(workbook.toEntries(), "docProps/core.xml");
   assert.match(coreXml, /<dc:creator>Alice<\/dc:creator>/);

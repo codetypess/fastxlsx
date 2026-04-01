@@ -286,9 +286,54 @@ export class Workbook {
         const sheet = currentWorkbook.getSheet(sheetConfig.name);
         if (sheetConfig.headers && sheetConfig.headers.length > 0) {
           sheet.setHeaders(sheetConfig.headers);
+          if (sheetConfig.headerStyle) {
+            sheet.setRangeStyle(`A1:${buildHeaderStyleEndAddress(sheetConfig.headers.length)}`, sheetConfig.headerStyle);
+          }
         }
         if (sheetConfig.records && sheetConfig.records.length > 0) {
           sheet.addRecords(sheetConfig.records);
+        }
+        if (sheetConfig.columnWidths) {
+          for (const [column, width] of Object.entries(sheetConfig.columnWidths)) {
+            sheet.setColumnWidth(column, width);
+          }
+        }
+        if (sheetConfig.rowHeights) {
+          for (const [rowNumberText, height] of Object.entries(sheetConfig.rowHeights)) {
+            const rowNumber = Number(rowNumberText);
+            if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+              throw new XlsxError(`Invalid row number: ${rowNumberText}`);
+            }
+
+            sheet.setRowHeight(rowNumber, height);
+          }
+        }
+        if (sheetConfig.rangeStyles) {
+          for (const rangeStyle of sheetConfig.rangeStyles) {
+            if (rangeStyle.patch) {
+              sheet.setRangeStyle(rangeStyle.range, rangeStyle.patch);
+            }
+            if (rangeStyle.numberFormat !== undefined) {
+              sheet.setRangeNumberFormat(rangeStyle.range, rangeStyle.numberFormat);
+            }
+            if (rangeStyle.backgroundColor !== undefined) {
+              sheet.setRangeBackgroundColor(rangeStyle.range, rangeStyle.backgroundColor);
+            }
+          }
+        }
+        if (sheetConfig.frozenPane) {
+          sheet.freezePane(sheetConfig.frozenPane.columnCount, sheetConfig.frozenPane.rowCount ?? 0);
+        }
+        if (sheetConfig.printArea !== undefined) {
+          sheet.setPrintArea(sheetConfig.printArea);
+        }
+        if (sheetConfig.printTitles !== undefined) {
+          sheet.setPrintTitles(sheetConfig.printTitles);
+        }
+        if (sheetConfig.comments) {
+          for (const comment of sheetConfig.comments) {
+            sheet.setComment(comment.address, comment.text, { author: comment.author ?? undefined });
+          }
         }
       }
 
@@ -1244,9 +1289,17 @@ function normalizeWorkbookCreateSheets(
       typeof sheet === "string"
         ? { name: sheet }
         : {
+            columnWidths: sheet.columnWidths ? { ...sheet.columnWidths } : undefined,
+            comments: sheet.comments ? sheet.comments.map((comment) => ({ ...comment })) : undefined,
+            frozenPane: sheet.frozenPane ? { ...sheet.frozenPane } : undefined,
             headers: sheet.headers ? [...sheet.headers] : undefined,
+            headerStyle: sheet.headerStyle ? { ...sheet.headerStyle } : undefined,
             name: sheet.name,
+            printArea: sheet.printArea,
+            printTitles: sheet.printTitles ? { ...sheet.printTitles } : undefined,
+            rangeStyles: sheet.rangeStyles ? sheet.rangeStyles.map((rangeStyle) => ({ ...rangeStyle, patch: rangeStyle.patch ? { ...rangeStyle.patch } : undefined })) : undefined,
             records: sheet.records ? sheet.records.map((record) => ({ ...record })) : undefined,
+            rowHeights: sheet.rowHeights ? { ...sheet.rowHeights } : undefined,
             visibility: sheet.visibility,
           };
 
@@ -1267,4 +1320,20 @@ function normalizeWorkbookCreateSheets(
 
 function resolveCreateSheetName(sheet: string | WorkbookCreateSheetOptions): string {
   return typeof sheet === "string" ? sheet : sheet.name;
+}
+
+function buildHeaderStyleEndAddress(headerCount: number): string {
+  if (headerCount < 1) {
+    return "A1";
+  }
+
+  let remaining = headerCount;
+  let label = "";
+  while (remaining > 0) {
+    const offset = (remaining - 1) % 26;
+    label = String.fromCharCode(65 + offset) + label;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+
+  return `${label}1`;
 }

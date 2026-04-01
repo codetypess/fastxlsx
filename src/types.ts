@@ -351,9 +351,28 @@ export interface SetDefinedNameOptions {
 }
 
 export interface WorkbookCreateSheetOptions {
+  columnWidths?: Record<string, number | null>;
+  comments?: SheetComment[];
+  frozenPane?: {
+    columnCount: number;
+    rowCount?: number;
+  };
   headers?: string[];
+  headerStyle?: CellStylePatch;
   name: string;
+  printArea?: string | null;
+  printTitles?: {
+    columns?: string | null;
+    rows?: string | null;
+  };
+  rangeStyles?: Array<{
+    backgroundColor?: string | null;
+    numberFormat?: string;
+    patch?: CellStylePatch;
+    range: string;
+  }>;
   records?: Array<Record<string, CellValue>>;
+  rowHeights?: Record<string, number | null>;
   visibility?: SheetVisibility;
 }
 
