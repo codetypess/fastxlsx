@@ -462,6 +462,61 @@ test("workflow-oriented sheet commands handle import/export and comments", async
   }
 });
 
+test("workflow-oriented sheet import/export commands support CSV formatting options", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = join(tempRoot, "input.xlsx");
+    const csvPath = join(tempRoot, "sheet.csv");
+    const outputPath = join(tempRoot, "output.xlsx");
+
+    let result = await runCliCapture([
+      "create",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    await writeFile(csvPath, " id , name \n 1001 , Alpha \n");
+
+    result = await runCliCapture([
+      "sheet",
+      "import",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--format",
+      "csv",
+      "--from",
+      csvPath,
+      "--trim-values",
+      "--output",
+      outputPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).result.headers[0], "id");
+
+    result = await runCliCapture([
+      "sheet",
+      "export",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--format",
+      "csv",
+      "--no-headers",
+      "--crlf",
+      "--output",
+      csvPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(await readFile(csvPath, "utf8"), "1001,Alpha\r\n");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("workflow-oriented sheet record upsert command inserts and updates by key", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
@@ -518,11 +573,58 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
       row: 2,
     });
 
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "get",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--value",
+      "1001",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).record, {
+      id: 1001,
+      name: "Alpha-2",
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "delete",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--value",
+      "1001",
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).deleted, true);
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "get",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--value",
+      "1001",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).record, null);
+
     const workbook = await Workbook.open(outputPath);
     assert.deepEqual(workbook.getSheet("Sheet1").getHeaders(), ["id", "name"]);
-    assert.deepEqual(workbook.getSheet("Sheet1").getRecords(), [
-      { id: 1001, name: "Alpha-2" },
-    ]);
+    assert.deepEqual(workbook.getSheet("Sheet1").getRecords(), []);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -584,6 +686,24 @@ test("workflow-oriented sheet layout command updates widths, heights, freeze, an
     assert.equal(sheet.getRowHeight(1), 22);
     assert.equal(sheet.getPrintArea(), "A1:B20");
     assert.deepEqual(sheet.getPrintTitles(), { columns: null, rows: "$1:$1" });
+
+    result = await runCliCapture([
+      "sheet",
+      "layout",
+      "get",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--columns",
+      '["A","B"]',
+      "--rows",
+      "[1]",
+    ]);
+    assert.equal(result.exitCode, 0);
+    const inspected = JSON.parse(result.stdout);
+    assert.deepEqual(inspected.columnWidths, { A: 12, B: 24 });
+    assert.deepEqual(inspected.rowHeights, { "1": 22 });
+    assert.equal(inspected.printArea, "A1:B20");
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

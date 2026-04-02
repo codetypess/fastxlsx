@@ -8,6 +8,7 @@ import {
   parseJsonCellRecordArray,
   parseJsonDocument,
   parseJsonStringArray,
+  resolveMatchValue,
   writeJson,
 } from "./cli-json.js";
 import type { CellRecord } from "./cli-json.js";
@@ -29,17 +30,24 @@ export function registerRecordCommands(
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--format <format>", "export format: json or csv")
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+    .option("--no-headers", "omit the CSV header row")
+    .option("--crlf", "use CRLF line endings for CSV output")
     .option("--output <file>", "output path")
     .action(
       async (
         file: string,
-        options: { format: string; headerRow: number; output?: string; sheet: string },
+        options: { crlf?: boolean; format: string; headerRow: number; headers?: boolean; output?: string; sheet: string },
       ) => {
         const inputPath = resolveFrom(io.cwd, file);
         const workbook = await Workbook.open(inputPath);
         const sheet = workbook.getSheet(options.sheet);
         const format = parseSheetTransferFormat(options.format);
-        const output = sheet.exportRecords({ format, headerRow: options.headerRow });
+        const output = sheet.exportRecords({
+          format,
+          headerRow: options.headerRow,
+          includeHeaders: options.headers !== false,
+          lineEnding: options.crlf ? "\r\n" : "\n",
+        });
 
         if (options.output) {
           const outputPath = resolveFrom(io.cwd, options.output);
@@ -47,7 +55,7 @@ export function registerRecordCommands(
             format === "json"
               ? `${JSON.stringify(output, null, 2)}\n`
               : typeof output === "string" && output.length > 0
-                ? `${output}\n`
+                ? `${output}${options.crlf ? "\r\n" : "\n"}`
                 : "";
           await writeFile(outputPath, content, "utf8");
           writeJson(io.stdout, {
@@ -79,6 +87,9 @@ export function registerRecordCommands(
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
     .option("--key-field <name>", "key field used for upsert mode")
     .option("--mode <mode>", "import mode: replace, append, or upsert")
+    .option("--trim-values", "trim CSV cell values before import")
+    .option("--no-trim-headers", "preserve CSV header whitespace")
+    .option("--no-infer-types", "keep imported CSV values as strings")
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
     .action(
@@ -88,11 +99,14 @@ export function registerRecordCommands(
           format: string;
           from: string;
           headerRow: number;
+          inferTypes?: boolean;
           inPlace?: boolean;
           keyField?: string;
           mode?: string;
           output?: string;
           sheet: string;
+          trimHeaders?: boolean;
+          trimValues?: boolean;
         },
       ) => {
         const inputPath = resolveFrom(io.cwd, file);
@@ -112,14 +126,24 @@ export function registerRecordCommands(
                 parseJsonCellRecordArray(await readFile(sourcePath, "utf8"), "--from"),
                 {
                   headerRow: options.headerRow,
+                  inferTypes: options.inferTypes !== false,
                   keyField: options.keyField,
                   mode,
+                  trimHeaders: options.trimHeaders !== false,
+                  trimValues: options.trimValues === true,
                 },
               )
-            : sheet.importRecords(parseCsvAsRecords(await readFile(sourcePath, "utf8")), {
+            : sheet.importRecords(parseCsvAsRecords(await readFile(sourcePath, "utf8"), {
+                inferTypes: options.inferTypes !== false,
+                trimHeaders: options.trimHeaders !== false,
+                trimValues: options.trimValues === true,
+              }), {
                 headerRow: options.headerRow,
+                inferTypes: options.inferTypes !== false,
                 keyField: options.keyField,
                 mode,
+                trimHeaders: options.trimHeaders !== false,
+                trimValues: options.trimValues === true,
               });
 
         await workbook.save(outputPath);
@@ -147,6 +171,38 @@ export function registerRecordCommands(
   const layoutCommand = sheetCommand
     .command("layout")
     .description("Workflow-oriented sheet layout commands");
+
+  layoutCommand
+    .command("get")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .option("--columns <json>", "JSON array of column labels to inspect")
+    .option("--rows <json>", "JSON array of row numbers to inspect")
+    .action(
+      async (
+        file: string,
+        options: {
+          columns?: string;
+          rows?: string;
+          sheet: string;
+        },
+      ) => {
+        const workbook = await Workbook.open(resolveFrom(io.cwd, file));
+        const sheet = workbook.getSheet(options.sheet);
+        const columns = options.columns ? parseJsonStringArray(options.columns, "--columns") : [];
+        const rows = options.rows ? parseJsonNumberArray(options.rows, "--rows") : [];
+
+        writeJson(io.stdout, {
+          action: "sheet.layout.get",
+          columnWidths: Object.fromEntries(columns.map((column) => [column, sheet.getColumnWidth(column)])),
+          freezePane: sheet.getFreezePane(),
+          printArea: sheet.getPrintArea(),
+          printTitles: sheet.getPrintTitles(),
+          rowHeights: Object.fromEntries(rows.map((rowNumber) => [String(rowNumber), sheet.getRowHeight(rowNumber)])),
+          sheet: options.sheet,
+        });
+      },
+    );
 
   layoutCommand
     .command("set")
@@ -237,6 +293,35 @@ export function registerRecordCommands(
     );
 
   sheetRecordsCommand
+    .command("get")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--key-field <name>", "key field used to match the record")
+    .option("--value <json>", "JSON scalar key value")
+    .option("--text <value>", "plain string key value")
+    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+    .action(
+      async (
+        file: string,
+        options: {
+          headerRow: number;
+          keyField: string;
+          sheet: string;
+          text?: string;
+          value?: string;
+        },
+      ) => {
+        const workbook = await Workbook.open(resolveFrom(io.cwd, file));
+        const sheet = workbook.getSheet(options.sheet);
+        writeJson(io.stdout, {
+          action: "sheet.records.get",
+          record: sheet.findRecordBy(options.keyField, resolveMatchValue(options.value, options.text), options.headerRow),
+          sheet: options.sheet,
+        });
+      },
+    );
+
+  sheetRecordsCommand
     .command("upsert")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
@@ -273,6 +358,52 @@ export function registerRecordCommands(
           output: outputPath,
           result,
           row: result.row,
+          sheet: options.sheet,
+        });
+      },
+    );
+
+  sheetRecordsCommand
+    .command("delete")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--key-field <name>", "key field used to match the record")
+    .option("--value <json>", "JSON scalar key value")
+    .option("--text <value>", "plain string key value")
+    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          headerRow: number;
+          inPlace?: boolean;
+          keyField: string;
+          output?: string;
+          sheet: string;
+          text?: string;
+          value?: string;
+        },
+      ) => {
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const deleted = sheet.removeRecordBy(
+          options.keyField,
+          resolveMatchValue(options.value, options.text),
+          options.headerRow,
+        );
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "sheet.records.delete",
+          deleted,
+          input: inputPath,
+          output: outputPath,
           sheet: options.sheet,
         });
       },
@@ -734,7 +865,14 @@ function parseSheetImportMode(value?: string): "append" | "replace" | "upsert" |
   throw new Error(`Expected --mode to be append, replace, or upsert, got: ${value}`);
 }
 
-function parseCsvAsRecords(source: string): CellRecord[] {
+function parseCsvAsRecords(
+  source: string,
+  options: {
+    inferTypes: boolean;
+    trimHeaders: boolean;
+    trimValues: boolean;
+  },
+): CellRecord[] {
   const rows = source.replace(/\r/g, "").split("\n");
   if (rows.at(-1) === "") {
     rows.pop();
@@ -745,7 +883,7 @@ function parseCsvAsRecords(source: string): CellRecord[] {
 
   const workbook = Workbook.create("Sheet1");
   const sheet = workbook.getSheet("Sheet1");
-  sheet.fromCsv(source, 1);
+  sheet.fromCsv(source, options);
   return sheet.toJson() as CellRecord[];
 }
 
@@ -767,6 +905,21 @@ function parseWorksheetNumberMap(source: string, label: string): Record<string, 
   }
 
   return next;
+}
+
+function parseJsonNumberArray(source: string, label: string): number[] {
+  const values = parseJsonDocument(source, label);
+  if (!Array.isArray(values)) {
+    throw new Error(`Expected ${label} to be an array`);
+  }
+
+  return values.map((value, index) => {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+      throw new Error(`Expected ${label}[${index}] to be a positive integer`);
+    }
+
+    return value;
+  });
 }
 
 async function getRecords(
