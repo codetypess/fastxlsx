@@ -153,6 +153,72 @@ workbook.batch((currentWorkbook) => {
 
 对于空白 sheet，`addRecord()`、`addRecords()`、`setRecord()`、`setRecords()` 会自动根据 record key 初始化表头行。
 
+创建一个带布局、注释和打印设置的导出模板：
+
+```ts
+const workbook = Workbook.create({
+  activeSheet: "Data",
+  sheets: [
+    {
+      name: "Data",
+      headers: ["id", "name", "score"],
+      records: [{ id: 1001, name: "Alpha", score: 98 }],
+      columnWidths: { A: 12, B: 24, C: 12 },
+      rowHeights: { "1": 24 },
+      frozenPane: { columnCount: 1, rowCount: 1 },
+      printArea: "A1:C20",
+      printTitles: { rows: "1:1" },
+      comments: [{ address: "C2", author: "fastxlsx", text: "Final score" }],
+      headerStyle: {
+        applyAlignment: true,
+        alignment: { horizontal: "center" },
+      },
+    },
+  ],
+});
+```
+
+按 key 同步记录，而不是整张表替换：
+
+```ts
+const sheet = workbook.getSheet("Data");
+
+sheet.syncRecords(
+  [
+    { id: 1002, name: "Beta", score: 91 },
+    { id: 1003, name: "Gamma", score: 87 },
+  ],
+  { keyField: "id" },
+);
+```
+
+使用更高层的 workbook helper 创建配置表和数据表：
+
+```ts
+workbook.createConfigSheet("Config", {
+  records: [
+    { Key: "timeout", Value: "30" },
+    { Key: "region", Value: "cn" },
+  ],
+});
+
+workbook.createTableSheet("Rewards", {
+  records: [
+    { id: 1, item: "Gold", amount: 100 },
+    { id: 2, item: "Gem", amount: 5 },
+  ],
+});
+```
+
+通过工作流 CLI 做导入导出和注释：
+
+```bash
+npm run cli -- sheet import input.xlsx --sheet Data --format json --from rows.json --output out.xlsx
+npm run cli -- sheet export out.xlsx --sheet Data --format csv --output rows.csv
+npm run cli -- sheet records upsert out.xlsx --sheet Data --key-field id --record '{"id":1002,"name":"Beta"}' --in-place
+npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final score" --in-place
+```
+
 ## 设计思路
 
 库分成两层：

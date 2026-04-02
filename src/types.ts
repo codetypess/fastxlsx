@@ -412,12 +412,18 @@ export interface CreateTableSheetOptions {
 export interface SheetExportRecordsOptions {
   format?: "csv" | "json";
   headerRow?: number;
+  includeHeaders?: boolean;
+  lineEnding?: "\n" | "\r\n";
 }
 
 export interface SheetImportRecordsOptions {
   headerRow?: number;
+  headerOrder?: string[];
+  inferTypes?: boolean;
   keyField?: string;
   mode?: "append" | "replace" | "upsert";
+  trimHeaders?: boolean;
+  trimValues?: boolean;
 }
 
 export interface SetHyperlinkOptions {

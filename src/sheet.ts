@@ -999,42 +999,61 @@ export class Sheet {
   /**
    * Replaces the current record set from JSON-ready objects.
    */
-  fromJson(records: Array<Record<string, CellValue>>, headerRowNumber = 1): void {
-    const headers = collectRecordHeaders(records);
-    if (headers.length > 0) {
-      this.setHeaders(headers, headerRowNumber);
+  fromJson(records: Array<Record<string, CellValue>>, headerRowNumber: number): void;
+  fromJson(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions): void;
+  fromJson(
+    records: Array<Record<string, CellValue>>,
+    headerRowOrOptions: number | SheetImportRecordsOptions = 1,
+  ): void {
+    const options = resolveSheetImportOptions(headerRowOrOptions);
+    const normalizedRecords = normalizeImportedRecords(records, options);
+
+    if (options.mode === "append" || options.mode === "upsert") {
+      this.importRecords(normalizedRecords, options);
+      return;
     }
 
-    this.setRecords(records, headerRowNumber);
+    const headers = options.headerOrder ?? collectRecordHeaders(normalizedRecords);
+    if (headers.length > 0) {
+      this.setHeaders(headers, options.headerRow);
+    }
+
+    this.setRecords(normalizedRecords, options.headerRow);
   }
 
   /**
    * Exports header-mapped records as CSV text.
    */
-  toCsv(headerRowNumber = 1): string {
-    const headers = trimTrailingEmptyHeaderNames(this.getHeaders(headerRowNumber));
+  toCsv(headerRowNumber: number): string;
+  toCsv(options: SheetExportRecordsOptions): string;
+  toCsv(headerRowOrOptions: number | SheetExportRecordsOptions = 1): string {
+    const options = resolveSheetExportOptions(headerRowOrOptions);
+    const headers = trimTrailingEmptyHeaderNames(this.getHeaders(options.headerRow));
     if (headers.length === 0) {
       return "";
     }
 
     const rows = [
-      headers,
-      ...this.getRecords(headerRowNumber).map((record) => headers.map((header) => formatCsvCellValue(record[header] ?? null))),
+      ...(options.includeHeaders ? [headers] : []),
+      ...this.getRecords(options.headerRow).map((record) => headers.map((header) => formatCsvCellValue(record[header] ?? null))),
     ];
 
-    return rows.map((row) => row.map((value) => escapeCsvField(value)).join(",")).join("\n");
+    return rows.map((row) => row.map((value) => escapeCsvField(value)).join(",")).join(options.lineEnding);
   }
 
   /**
    * Replaces the current record set from CSV text using the first row as headers.
    */
-  fromCsv(csv: string, headerRowNumber = 1): void {
+  fromCsv(csv: string, headerRowNumber: number): void;
+  fromCsv(csv: string, options: SheetImportRecordsOptions): void;
+  fromCsv(csv: string, headerRowOrOptions: number | SheetImportRecordsOptions = 1): void {
+    const options = resolveSheetImportOptions(headerRowOrOptions);
     const rows = parseCsvRows(csv);
     if (rows.length === 0) {
       return;
     }
 
-    const headers = rows[0]!.map((value) => value.trim());
+    const headers = rows[0]!.map((value) => (options.trimHeaders ? value.trim() : value));
     const records = rows.slice(1).map((row) => {
       const record: Record<string, CellValue> = {};
 
@@ -1044,14 +1063,18 @@ export class Sheet {
           continue;
         }
 
-        record[header] = parseCsvCellValue(row[index] ?? "");
+        const rawValue = row[index] ?? "";
+        const normalizedValue = options.trimValues ? rawValue.trim() : rawValue;
+        record[header] = options.inferTypes ? parseCsvCellValue(normalizedValue) : (normalizedValue.length === 0 ? null : normalizedValue);
       }
 
       return record;
     });
 
-    this.setHeaders(headers, headerRowNumber);
-    this.setRecords(records, headerRowNumber);
+    this.fromJson(records, {
+      ...options,
+      headerOrder: options.headerOrder ?? headers,
+    });
   }
 
   /**
@@ -1060,7 +1083,7 @@ export class Sheet {
   exportRecords(options: SheetExportRecordsOptions = {}): Array<Record<string, CellValue>> | string {
     const headerRow = options.headerRow ?? 1;
     const format = options.format ?? "json";
-    return format === "csv" ? this.toCsv(headerRow) : this.toJson(headerRow);
+    return format === "csv" ? this.toCsv(options) : this.toJson(headerRow);
   }
 
   /**
@@ -1448,6 +1471,13 @@ export class Sheet {
   }
 
   /**
+   * Alias for {@link getComment}.
+   */
+  comment(address: string): SheetComment | null {
+    return this.getComment(address);
+  }
+
+  /**
    * Lists worksheet hyperlinks.
    */
   getHyperlinks(): Hyperlink[] {
@@ -1565,6 +1595,16 @@ export class Sheet {
   }
 
   /**
+   * Replaces the full worksheet comment set.
+   */
+  setComments(comments: SheetComment[]): SheetComment[] {
+    this.clearComments();
+    return comments.map((comment) =>
+      this.setComment(comment.address, comment.text, { author: comment.author ?? undefined }),
+    );
+  }
+
+  /**
    * Removes a worksheet comment by cell address.
    */
   removeComment(address: string): void {
@@ -1616,6 +1656,15 @@ export class Sheet {
     }
     if (nextContentTypesXml !== this.readContentTypesXml()) {
       this.writeContentTypesXml(nextContentTypesXml);
+    }
+  }
+
+  /**
+   * Removes all worksheet comments.
+   */
+  clearComments(): void {
+    for (const comment of this.getComments()) {
+      this.removeComment(comment.address);
     }
   }
 
@@ -3036,6 +3085,72 @@ function trimTrailingEmptyHeaderNames(headers: string[]): string[] {
   }
 
   return headers.slice(0, end);
+}
+
+function resolveSheetExportOptions(
+  headerRowOrOptions: number | SheetExportRecordsOptions,
+): Required<Pick<SheetExportRecordsOptions, "headerRow" | "includeHeaders" | "lineEnding">> & SheetExportRecordsOptions {
+  if (typeof headerRowOrOptions === "number") {
+    return {
+      format: "csv",
+      headerRow: headerRowOrOptions,
+      includeHeaders: true,
+      lineEnding: "\n",
+    };
+  }
+
+  return {
+    ...headerRowOrOptions,
+    headerRow: headerRowOrOptions.headerRow ?? 1,
+    includeHeaders: headerRowOrOptions.includeHeaders ?? true,
+    lineEnding: headerRowOrOptions.lineEnding ?? "\n",
+  };
+}
+
+function resolveSheetImportOptions(
+  headerRowOrOptions: number | SheetImportRecordsOptions,
+): Required<Pick<SheetImportRecordsOptions, "headerRow" | "inferTypes" | "trimHeaders" | "trimValues">> & SheetImportRecordsOptions {
+  if (typeof headerRowOrOptions === "number") {
+    return {
+      headerRow: headerRowOrOptions,
+      inferTypes: true,
+      trimHeaders: true,
+      trimValues: false,
+    };
+  }
+
+  return {
+    ...headerRowOrOptions,
+    headerRow: headerRowOrOptions.headerRow ?? 1,
+    inferTypes: headerRowOrOptions.inferTypes ?? true,
+    trimHeaders: headerRowOrOptions.trimHeaders ?? true,
+    trimValues: headerRowOrOptions.trimValues ?? false,
+  };
+}
+
+function normalizeImportedRecords(
+  records: Array<Record<string, CellValue>>,
+  options: SheetImportRecordsOptions,
+): Array<Record<string, CellValue>> {
+  const headerOrder = options.headerOrder;
+  if (!headerOrder || headerOrder.length === 0) {
+    return records.map((record) => ({ ...record }));
+  }
+
+  return records.map((record) => {
+    const nextRecord: Record<string, CellValue> = {};
+    for (const header of headerOrder) {
+      nextRecord[header] = Object.hasOwn(record, header) ? record[header] ?? null : null;
+    }
+
+    for (const [key, value] of Object.entries(record)) {
+      if (!Object.hasOwn(nextRecord, key)) {
+        nextRecord[key] = value;
+      }
+    }
+
+    return nextRecord;
+  });
 }
 
 function formatCsvCellValue(value: CellValue): string {

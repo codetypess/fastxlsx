@@ -3488,6 +3488,50 @@ test("sheet CSV helpers import and export header-mapped records", async () => {
   );
 });
 
+test("sheet CSV helpers support export and import options", async () => {
+  const workbook = Workbook.create("Data");
+  const sheet = workbook.getSheet("Data");
+
+  sheet.fromCsv(" id , name \n 1001 , Alpha \n", {
+    trimHeaders: true,
+    trimValues: true,
+  });
+  assert.deepEqual(sheet.getHeaders(), ["id", "name"]);
+  assert.deepEqual(sheet.getRecords(), [{ id: 1001, name: "Alpha" }]);
+
+  assert.equal(
+    sheet.toCsv({ includeHeaders: false, lineEnding: "\r\n" }),
+    "1001,Alpha",
+  );
+});
+
+test("sheet JSON helpers support header order and append/upsert options", async () => {
+  const workbook = Workbook.create("Data");
+  const sheet = workbook.getSheet("Data");
+
+  sheet.fromJson(
+    [{ name: "Alpha", id: 1001 }],
+    { headerOrder: ["id", "name"] },
+  );
+  assert.deepEqual(sheet.getHeaders(), ["id", "name"]);
+  assert.deepEqual(sheet.getRecords(), [{ id: 1001, name: "Alpha" }]);
+
+  sheet.fromJson([{ id: 1002, name: "Beta" }], { mode: "append" });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta" },
+  ]);
+
+  sheet.fromJson([{ id: 1002, name: "Beta-2" }], {
+    keyField: "id",
+    mode: "upsert",
+  });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha" },
+    { id: 1002, name: "Beta-2" },
+  ]);
+});
+
 test("sheet record workflow APIs import, export, and sync records", async () => {
   const workbook = Workbook.create("Data");
   const sheet = workbook.getSheet("Data");
@@ -4296,6 +4340,11 @@ test("sheet comment APIs create, update, read, and delete comments", async () =>
     author: "Alice",
     text: "Hello comment",
   });
+  assert.deepEqual(sheet.comment("B2"), {
+    address: "B2",
+    author: "Alice",
+    text: "Hello comment",
+  });
 
   let entries = workbook.toEntries();
   let sheetXml = entryText(entries, "xl/worksheets/sheet1.xml");
@@ -4338,12 +4387,28 @@ test("sheet comment APIs create, update, read, and delete comments", async () =>
     { address: "B2", author: "Alice", text: "Updated" },
   ]);
 
-  sheet.removeComment("A1");
+  assert.deepEqual(
+    sheet.setComments([
+      { address: "C3", author: "Bob", text: "Third" },
+      { address: "D4", author: null, text: "Fourth" },
+    ]),
+    [
+      { address: "C3", author: "Bob", text: "Third" },
+      { address: "D4", author: "Bob", text: "Fourth" },
+    ],
+  );
   assert.deepEqual(sheet.getComments(), [
-    { address: "B2", author: "Alice", text: "Updated" },
+    { address: "C3", author: "Bob", text: "Third" },
+    { address: "D4", author: "Bob", text: "Fourth" },
   ]);
 
-  sheet.removeComment("B2");
+  sheet.removeComment("A1");
+  assert.deepEqual(sheet.getComments(), [
+    { address: "C3", author: "Bob", text: "Third" },
+    { address: "D4", author: "Bob", text: "Fourth" },
+  ]);
+
+  sheet.clearComments();
   assert.deepEqual(sheet.getComments(), []);
   assert.equal(sheet.getComment("B2"), null);
 

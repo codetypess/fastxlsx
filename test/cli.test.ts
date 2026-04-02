@@ -361,6 +361,173 @@ test("json and csv record commands import and export sheet records", async () =>
   }
 });
 
+test("workflow-oriented sheet commands handle import/export and comments", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writeFixtureWorkbook(tempRoot);
+    const jsonPath = join(tempRoot, "sheet.json");
+    const csvPath = join(tempRoot, "sheet.csv");
+    const importedPath = join(tempRoot, "sheet-imported.xlsx");
+    const commentedPath = join(tempRoot, "sheet-commented.xlsx");
+
+    await writeFile(jsonPath, `${JSON.stringify([{ id: 1001, name: "Alpha" }], null, 2)}\n`);
+    await writeFile(csvPath, "id,name\n1002,Beta\n");
+
+    let result = await runCliCapture([
+      "sheet",
+      "import",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--format",
+      "json",
+      "--from",
+      jsonPath,
+      "--output",
+      importedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).result.imported, 1);
+
+    result = await runCliCapture([
+      "sheet",
+      "export",
+      importedPath,
+      "--sheet",
+      "Sheet1",
+      "--format",
+      "csv",
+      "--output",
+      csvPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(await readFile(csvPath, "utf8"), "id,name\n1001,Alpha\n");
+
+    result = await runCliCapture([
+      "sheet",
+      "comment",
+      "set",
+      importedPath,
+      "--sheet",
+      "Sheet1",
+      "--cell",
+      "B2",
+      "--text",
+      "Note",
+      "--author",
+      "Alice",
+      "--output",
+      commentedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).comment, {
+      address: "B2",
+      author: "Alice",
+      text: "Note",
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "comment",
+      "get",
+      commentedPath,
+      "--sheet",
+      "Sheet1",
+      "--cell",
+      "B2",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).comment, {
+      address: "B2",
+      author: "Alice",
+      text: "Note",
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "comment",
+      "delete",
+      commentedPath,
+      "--sheet",
+      "Sheet1",
+      "--cell",
+      "B2",
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).deleted, true);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("workflow-oriented sheet record upsert command inserts and updates by key", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = join(tempRoot, "input.xlsx");
+    const outputPath = join(tempRoot, "records-upsert.xlsx");
+
+    let result = await runCliCapture([
+      "create",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+    ]);
+    assert.equal(result.exitCode, 0);
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "upsert",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--record",
+      '{"id":1001,"name":"Alpha"}',
+      "--output",
+      outputPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).result, {
+      inserted: true,
+      record: { id: 1001, name: "Alpha" },
+      row: 2,
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "upsert",
+      outputPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--record",
+      '{"id":1001,"name":"Alpha-2"}',
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).result, {
+      inserted: false,
+      record: { id: 1001, name: "Alpha-2" },
+      row: 2,
+    });
+
+    const workbook = await Workbook.open(outputPath);
+    assert.deepEqual(workbook.getSheet("Sheet1").getHeaders(), ["id", "name"]);
+    assert.deepEqual(workbook.getSheet("Sheet1").getRecords(), [
+      { id: 1001, name: "Alpha-2" },
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("add-record initializes headers on a newly created workbook", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 

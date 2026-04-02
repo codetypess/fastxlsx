@@ -157,6 +157,72 @@ workbook.batch((currentWorkbook) => {
 
 On blank sheets, `addRecord()`, `addRecords()`, `setRecord()`, and `setRecords()` initialize the header row from record keys automatically.
 
+Build an export-ready template with layout, comments, and print settings:
+
+```ts
+const workbook = Workbook.create({
+  activeSheet: "Data",
+  sheets: [
+    {
+      name: "Data",
+      headers: ["id", "name", "score"],
+      records: [{ id: 1001, name: "Alpha", score: 98 }],
+      columnWidths: { A: 12, B: 24, C: 12 },
+      rowHeights: { "1": 24 },
+      frozenPane: { columnCount: 1, rowCount: 1 },
+      printArea: "A1:C20",
+      printTitles: { rows: "1:1" },
+      comments: [{ address: "C2", author: "fastxlsx", text: "Final score" }],
+      headerStyle: {
+        applyAlignment: true,
+        alignment: { horizontal: "center" },
+      },
+    },
+  ],
+});
+```
+
+Sync records by key instead of replacing the whole sheet:
+
+```ts
+const sheet = workbook.getSheet("Data");
+
+sheet.syncRecords(
+  [
+    { id: 1002, name: "Beta", score: 91 },
+    { id: 1003, name: "Gamma", score: 87 },
+  ],
+  { keyField: "id" },
+);
+```
+
+Use the higher-level workbook helpers for config and table sheets:
+
+```ts
+workbook.createConfigSheet("Config", {
+  records: [
+    { Key: "timeout", Value: "30" },
+    { Key: "region", Value: "cn" },
+  ],
+});
+
+workbook.createTableSheet("Rewards", {
+  records: [
+    { id: 1, item: "Gold", amount: 100 },
+    { id: 2, item: "Gem", amount: 5 },
+  ],
+});
+```
+
+Use workflow CLI commands for import/export and comments:
+
+```bash
+npm run cli -- sheet import input.xlsx --sheet Data --format json --from rows.json --output out.xlsx
+npm run cli -- sheet export out.xlsx --sheet Data --format csv --output rows.csv
+npm run cli -- sheet records upsert out.xlsx --sheet Data --key-field id --record '{"id":1002,"name":"Beta"}' --in-place
+npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final score" --in-place
+```
+
 ## Design
 
 The library is split into two layers:
