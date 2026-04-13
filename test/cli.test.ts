@@ -2060,14 +2060,51 @@ test("table generate-profiles scans full workbooks and supports multiple xlsx in
 
     assert.equal(result.exitCode, 0);
 
-    const payload = JSON.parse(result.stdout);
-    assert.deepEqual(payload.files, [inputPath, secondInputPath]);
-    assert.deepEqual(payload.profileNames, [
-      "input#Sheet1",
-      "input#Config Values",
-      "define#Sheet1",
+    assert.equal(result.stdout, `Profile file generated: ${outputPath}\n`);
+
+    const outputPayload = JSON.parse(await readFile(outputPath, "utf8"));
+    assert.deepEqual(outputPayload, {
+      profiles: {
+        "input#Sheet1": {
+          sheet: "Sheet1",
+          headerRow: 1,
+          dataStartRow: 6,
+          keyFields: ["id"],
+        },
+        "input#Config Values": {
+          sheet: "Config Values",
+          headerRow: 2,
+          dataStartRow: 7,
+          keyFields: ["key"],
+        },
+        "define#Sheet1": {
+          sheet: "Sheet1",
+          headerRow: 2,
+          dataStartRow: 7,
+          keyFields: ["key1", "key2"],
+        },
+      },
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles prints full profiles when no output file is provided", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writeProfileGenerationWorkbook(tempRoot);
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
     ]);
-    assert.equal(payload.output, outputPath);
+
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.output, null);
     assert.deepEqual(payload.profiles, {
       "input#Sheet1": {
         sheet: "Sheet1",
@@ -2081,16 +2118,6 @@ test("table generate-profiles scans full workbooks and supports multiple xlsx in
         dataStartRow: 7,
         keyFields: ["key"],
       },
-      "define#Sheet1": {
-        sheet: "Sheet1",
-        headerRow: 2,
-        dataStartRow: 7,
-        keyFields: ["key1", "key2"],
-      },
-    });
-
-    assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), {
-      profiles: payload.profiles,
     });
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
@@ -2121,6 +2148,78 @@ test("table generate-profiles can read xlsx inputs from a file list", async () =
       "input#Sheet1",
       "input#Config Values",
       "define#Sheet1",
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles skips sheets with uninferable table profiles", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writeProfileGenerationWorkbook(tempRoot);
+    const workbook = await Workbook.open(inputPath);
+    workbook.addSheet("Scratch");
+    await workbook.save(inputPath);
+
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+    ]);
+
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.profileNames, [
+      "input#Sheet1",
+      "input#Config Values",
+    ]);
+    assert.deepEqual(payload.skipped, [
+      {
+        file: inputPath,
+        reason: "Unable to infer table header row for sheet: Scratch",
+        sheet: "Scratch",
+      },
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles skips duplicate generated profile names", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writeCompositeStructuredTableWorkbook(join(tempRoot, "first"));
+    const duplicateInputPath = await writeCompositeStructuredTableWorkbook(join(tempRoot, "second"));
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+      duplicateInputPath,
+    ]);
+
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.profileNames, ["input#Sheet1"]);
+    assert.deepEqual(payload.profiles, {
+      "input#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key1", "key2"],
+      },
+    });
+    assert.deepEqual(payload.skipped, [
+      {
+        file: duplicateInputPath,
+        profileName: "input#Sheet1",
+        reason: "Duplicate generated profile name: input#Sheet1",
+        sheet: "Sheet1",
+      },
     ]);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

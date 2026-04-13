@@ -393,10 +393,14 @@ export function registerTableCommands(
           await writeFile(outputPath, `${JSON.stringify({ profiles: result.profiles }, null, 2)}\n`);
         }
 
-        writeJson(io.stdout, {
-          ...result,
-          output: outputPath,
-        });
+        if (outputPath) {
+          io.stdout(`Profile file generated: ${outputPath}\n`);
+        } else {
+          writeJson(io.stdout, {
+            ...result,
+            output: null,
+          });
+        }
       },
     );
 

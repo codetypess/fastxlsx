@@ -7,6 +7,7 @@ import {
   assertRecord,
   assertString,
   assertStringArray,
+  formatError,
   parseJsonDocument,
 } from "./cli-json.js";
 import type { CellRecord } from "./cli-json.js";
@@ -29,6 +30,13 @@ export interface TableProfile {
   dataStartRow: number;
   headerRow: number;
   keyFields?: string[];
+  sheet: string;
+}
+
+export interface SkippedTableProfile {
+  file: string;
+  profileName?: string;
+  reason: string;
   sheet: string;
 }
 
@@ -237,9 +245,11 @@ export async function generateTableProfiles(
   files: string[];
   profileNames: string[];
   profiles: Record<string, TableProfile>;
+  skipped: SkippedTableProfile[];
 }> {
   const profiles: Record<string, TableProfile> = {};
   const files: string[] = [];
+  const skipped: SkippedTableProfile[] = [];
 
   for (const filePath of filePaths) {
     const workbook = await Workbook.open(filePath);
@@ -253,10 +263,24 @@ export async function generateTableProfiles(
     for (const sheet of sheets) {
       const profileName = inferProfileName(filePath, sheet.name);
       if (Object.hasOwn(profiles, profileName)) {
-        throw new Error(`Duplicate generated profile name: ${profileName}`);
+        skipped.push({
+          file: filePath,
+          profileName,
+          reason: `Duplicate generated profile name: ${profileName}`,
+          sheet: sheet.name,
+        });
+        continue;
       }
 
-      profiles[profileName] = inferTableProfile(sheet);
+      try {
+        profiles[profileName] = inferTableProfile(sheet);
+      } catch (error) {
+        skipped.push({
+          file: filePath,
+          reason: formatError(error),
+          sheet: sheet.name,
+        });
+      }
     }
   }
 
@@ -264,6 +288,7 @@ export async function generateTableProfiles(
     files,
     profileNames: Object.keys(profiles),
     profiles,
+    skipped,
   };
 }
 
