@@ -390,11 +390,15 @@ export function registerTableCommands(
         const outputPath = options.output ? resolveFrom(io.cwd, options.output) : null;
 
         if (outputPath) {
-          await writeFile(outputPath, `${JSON.stringify({ profiles: result.profiles }, null, 2)}\n`);
+          const outputPayload =
+            result.skipped.length === 0
+              ? { profiles: result.profiles }
+              : { profiles: result.profiles, skipped: result.skipped };
+          await writeFile(outputPath, `${JSON.stringify(outputPayload, null, 2)}\n`);
         }
 
         if (outputPath) {
-          io.stdout(`Profile file generated: ${outputPath}\n`);
+          io.stdout(`Generated profile file: ${outputPath}\n`);
         } else {
           writeJson(io.stdout, {
             ...result,

@@ -132,9 +132,9 @@ fastxlsx table generate-profiles res/task.xlsx
 fastxlsx table generate-profiles res/task.xlsx res/monster.xlsx --sheet-filter '^(main|conf)$' --output table-profiles.json
 ```
 
-Sheets whose table profile cannot be inferred, or whose generated profile name duplicates an earlier sheet, are skipped. The JSON output includes `skipped` entries with `file`, `sheet`, `reason`, and `profileName` when available.
+Workbook open failures, sheets whose table profile cannot be inferred, and duplicate generated profile names are skipped. The JSON output includes `skipped` entries with `file`, `reason`, and optional `sheet` or `profileName`.
 
-When `--output` is used, stdout only prints `Profile file generated: <path>`; read the output file for the full generated `profiles` object.
+When `--output` is used, stdout only prints `Generated profile file: <path>`; read the output file for the full generated `profiles` object and any `skipped` records.
 
 For large workbook sets, avoid passing every path as a command argument. Write the paths to a newline-delimited file and use `--files-from` so shell argument length limits are not hit:
 

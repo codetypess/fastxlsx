@@ -37,7 +37,7 @@ export interface SkippedTableProfile {
   file: string;
   profileName?: string;
   reason: string;
-  sheet: string;
+  sheet?: string;
 }
 
 export interface TableCommandContext {
@@ -252,7 +252,17 @@ export async function generateTableProfiles(
   const skipped: SkippedTableProfile[] = [];
 
   for (const filePath of filePaths) {
-    const workbook = await Workbook.open(filePath);
+    let workbook: Workbook;
+    try {
+      workbook = await Workbook.open(filePath);
+    } catch (error) {
+      skipped.push({
+        file: filePath,
+        reason: formatError(error),
+      });
+      continue;
+    }
+
     files.push(filePath);
 
     const sheets =

@@ -2060,7 +2060,7 @@ test("table generate-profiles scans full workbooks and supports multiple xlsx in
 
     assert.equal(result.exitCode, 0);
 
-    assert.equal(result.stdout, `Profile file generated: ${outputPath}\n`);
+    assert.equal(result.stdout, `Generated profile file: ${outputPath}\n`);
 
     const outputPayload = JSON.parse(await readFile(outputPath, "utf8"));
     assert.deepEqual(outputPayload, {
@@ -2221,6 +2221,46 @@ test("table generate-profiles skips duplicate generated profile names", async ()
         sheet: "Sheet1",
       },
     ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table generate-profiles records workbook open failures", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writeCompositeStructuredTableWorkbook(tempRoot);
+    const badInputPath = join(tempRoot, "bad.xlsx");
+    const outputPath = join(tempRoot, "profiles.json");
+    await writeFile(badInputPath, "not a real workbook");
+
+    const result = await runCliCapture([
+      "table",
+      "generate-profiles",
+      inputPath,
+      badInputPath,
+      "--output",
+      outputPath,
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `Generated profile file: ${outputPath}\n`);
+
+    const outputPayload = JSON.parse(await readFile(outputPath, "utf8"));
+    assert.deepEqual(outputPayload.profiles, {
+      "input#Sheet1": {
+        sheet: "Sheet1",
+        headerRow: 2,
+        dataStartRow: 7,
+        keyFields: ["key1", "key2"],
+      },
+    });
+    assert.equal(outputPayload.skipped.length, 1);
+    assert.equal(outputPayload.skipped[0].file, badInputPath);
+    assert.equal(outputPayload.skipped[0].sheet, undefined);
+    assert.equal(typeof outputPayload.skipped[0].reason, "string");
+    assert.notEqual(outputPayload.skipped[0].reason.length, 0);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
