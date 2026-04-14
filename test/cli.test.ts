@@ -476,7 +476,9 @@ test("record commands manage header-based sheet data through the CLI", async () 
       recordsPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).records, [{ Key: "alpha", Value: "1" }]);
+    const addRecordPayload = JSON.parse(result.stdout);
+    assert.equal(addRecordPayload.recordCount, 1);
+    assert.equal("records" in addRecordPayload, false);
 
     result = await runCliCapture([
       "set-records",
@@ -489,10 +491,9 @@ test("record commands manage header-based sheet data through the CLI", async () 
       replacedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).records, [
-      { Key: "alpha", Value: "10" },
-      { Key: "beta", Value: "20" },
-    ]);
+    const setRecordsPayload = JSON.parse(result.stdout);
+    assert.equal(setRecordsPayload.recordCount, 2);
+    assert.equal("records" in setRecordsPayload, false);
 
     result = await runCliCapture([
       "delete-record",
@@ -505,6 +506,9 @@ test("record commands manage header-based sheet data through the CLI", async () 
       deletedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const deleteRecordPayload = JSON.parse(result.stdout);
+    assert.equal(deleteRecordPayload.recordCount, 1);
+    assert.equal("records" in deleteRecordPayload, false);
 
     result = await runCliCapture(["records", deletedPath, "--sheet", "Sheet1"]);
     assert.equal(result.exitCode, 0);
@@ -545,10 +549,9 @@ test("json and csv record commands import and export sheet records", async () =>
       fromJsonPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).records, [
-      { id: 1001, name: "Alpha" },
-      { id: 1002, name: "Beta" },
-    ]);
+    const importJsonPayload = JSON.parse(result.stdout);
+    assert.equal(importJsonPayload.recordCount, 2);
+    assert.equal("records" in importJsonPayload, false);
 
     result = await runCliCapture([
       "export-json",
@@ -575,10 +578,9 @@ test("json and csv record commands import and export sheet records", async () =>
       fromCsvPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).records, [
-      { id: 1003, name: "Gamma", notes: "A, B" },
-      { id: 1004, name: "Delta", notes: "line 1\nline 2" },
-    ]);
+    const importCsvPayload = JSON.parse(result.stdout);
+    assert.equal(importCsvPayload.recordCount, 2);
+    assert.equal("records" in importCsvPayload, false);
 
     result = await runCliCapture([
       "export-csv",
@@ -1005,7 +1007,11 @@ test("workflow-oriented sheet record list, append, and replace commands manage r
       appendedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).appended, 2);
+    const appendPayload = JSON.parse(result.stdout);
+    assert.equal(appendPayload.appended, 2);
+    assert.equal(appendPayload.recordCount, 2);
+    assert.equal("headers" in appendPayload, false);
+    assert.equal("records" in appendPayload, false);
 
     result = await runCliCapture([
       "sheet",
@@ -1033,7 +1039,11 @@ test("workflow-oriented sheet record list, append, and replace commands manage r
       "--in-place",
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).replaced, 1);
+    const replacePayload = JSON.parse(result.stdout);
+    assert.equal(replacePayload.replaced, 1);
+    assert.equal(replacePayload.recordCount, 1);
+    assert.equal("headers" in replacePayload, false);
+    assert.equal("records" in replacePayload, false);
 
     const workbook = await Workbook.open(appendedPath);
     assert.deepEqual(workbook.getSheet("Sheet1").getRecords(), [
@@ -1575,7 +1585,9 @@ test("add-record initializes headers on a newly created workbook", async () => {
       recordsPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).records, [{ Key: "alpha", Value: "1" }]);
+    const createdRecordPayload = JSON.parse(result.stdout);
+    assert.equal(createdRecordPayload.recordCount, 1);
+    assert.equal("records" in createdRecordPayload, false);
 
     const workbook = await Workbook.open(recordsPath);
     assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value"]);
@@ -1623,6 +1635,12 @@ test("config-table command group supports high-level config workflows", async ()
       upsertedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const configInsertPayload = JSON.parse(result.stdout);
+    assert.equal(configInsertPayload.inserted, true);
+    assert.equal(configInsertPayload.recordCount, 1);
+    assert.equal(configInsertPayload.row, 2);
+    assert.equal("records" in configInsertPayload, false);
+    assert.equal("rows" in configInsertPayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1638,6 +1656,12 @@ test("config-table command group supports high-level config workflows", async ()
       updatedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const configUpsertPayload = JSON.parse(result.stdout);
+    assert.equal(configUpsertPayload.inserted, false);
+    assert.equal(configUpsertPayload.recordCount, 1);
+    assert.equal(configUpsertPayload.row, 2);
+    assert.equal("records" in configUpsertPayload, false);
+    assert.equal("rows" in configUpsertPayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1671,7 +1695,11 @@ test("config-table command group supports high-level config workflows", async ()
       "--in-place",
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).updated, true);
+    const configUpdatePayload = JSON.parse(result.stdout);
+    assert.equal(configUpdatePayload.updated, true);
+    assert.equal(configUpdatePayload.recordCount, 1);
+    assert.equal("records" in configUpdatePayload, false);
+    assert.equal("rows" in configUpdatePayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1704,7 +1732,11 @@ test("config-table command group supports high-level config workflows", async ()
       deletedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).deleted, true);
+    const configDeletePayload = JSON.parse(result.stdout);
+    assert.equal(configDeletePayload.deleted, true);
+    assert.equal(configDeletePayload.recordCount, 0);
+    assert.equal("records" in configDeletePayload, false);
+    assert.equal("rows" in configDeletePayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1718,6 +1750,10 @@ test("config-table command group supports high-level config workflows", async ()
       replacedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const configReplacePayload = JSON.parse(result.stdout);
+    assert.equal(configReplacePayload.recordCount, 2);
+    assert.equal("records" in configReplacePayload, false);
+    assert.equal("rows" in configReplacePayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1777,7 +1813,10 @@ test("config-table sync imports JSON config objects in replace, update, and upse
       replaceOutputPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).mode, "replace");
+    const configSyncReplacePayload = JSON.parse(result.stdout);
+    assert.equal(configSyncReplacePayload.mode, "replace");
+    assert.equal(configSyncReplacePayload.recordCount, 2);
+    assert.equal("rows" in configSyncReplacePayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1816,7 +1855,10 @@ test("config-table sync imports JSON config objects in replace, update, and upse
       "--in-place",
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).mode, "upsert");
+    const configSyncUpsertPayload = JSON.parse(result.stdout);
+    assert.equal(configSyncUpsertPayload.mode, "upsert");
+    assert.equal(configSyncUpsertPayload.recordCount, 3);
+    assert.equal("rows" in configSyncUpsertPayload, false);
 
     await writeFile(
       updateJsonPath,
@@ -1836,7 +1878,10 @@ test("config-table sync imports JSON config objects in replace, update, and upse
       "--in-place",
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).mode, "update");
+    const configSyncUpdatePayload = JSON.parse(result.stdout);
+    assert.equal(configSyncUpdatePayload.mode, "update");
+    assert.equal(configSyncUpdatePayload.recordCount, 3);
+    assert.equal("rows" in configSyncUpdatePayload, false);
 
     result = await runCliCapture([
       "config-table",
@@ -1926,6 +1971,10 @@ test("table command group respects explicit data row boundaries", async () => {
       upsertedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const tableUpsertPayload = JSON.parse(result.stdout);
+    assert.equal(tableUpsertPayload.inserted, false);
+    assert.equal(tableUpsertPayload.recordCount, 2);
+    assert.equal("rows" in tableUpsertPayload, false);
 
     await writeFile(
       syncJsonPath,
@@ -1957,6 +2006,9 @@ test("table command group respects explicit data row boundaries", async () => {
       syncedPath,
     ]);
     assert.equal(result.exitCode, 0);
+    const tableSyncPayload = JSON.parse(result.stdout);
+    assert.equal(tableSyncPayload.recordCount, 2);
+    assert.equal("rows" in tableSyncPayload, false);
 
     result = await runCliCapture([
       "table",
@@ -2016,10 +2068,10 @@ test("table update patches structured rows without clearing omitted fields", asy
       upsertedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout).rows, [
-      { row: 6, record: { id: 1001, name: "Alpha", note: "first" } },
-      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
-    ]);
+    const patchedUpsertPayload = JSON.parse(result.stdout);
+    assert.equal(patchedUpsertPayload.inserted, false);
+    assert.equal(patchedUpsertPayload.recordCount, 2);
+    assert.equal("rows" in patchedUpsertPayload, false);
 
     result = await runCliCapture([
       "table",
@@ -2041,11 +2093,10 @@ test("table update patches structured rows without clearing omitted fields", asy
       updatedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).updated, true);
-    assert.deepEqual(JSON.parse(result.stdout).rows, [
-      { row: 6, record: { id: 1001, name: "Alpha", note: "first-patched" } },
-      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
-    ]);
+    const tableUpdatePayload = JSON.parse(result.stdout);
+    assert.equal(tableUpdatePayload.updated, true);
+    assert.equal(tableUpdatePayload.recordCount, 2);
+    assert.equal("rows" in tableUpdatePayload, false);
 
     await writeFile(
       syncJsonPath,
@@ -2072,11 +2123,10 @@ test("table update patches structured rows without clearing omitted fields", asy
       syncedPath,
     ]);
     assert.equal(result.exitCode, 0);
-    assert.equal(JSON.parse(result.stdout).mode, "update");
-    assert.deepEqual(JSON.parse(result.stdout).rows, [
-      { row: 6, record: { id: 1001, name: "Alpha-2", note: "first-patched" } },
-      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
-    ]);
+    const tableUpdateSyncPayload = JSON.parse(result.stdout);
+    assert.equal(tableUpdateSyncPayload.mode, "update");
+    assert.equal(tableUpdateSyncPayload.recordCount, 2);
+    assert.equal("rows" in tableUpdateSyncPayload, false);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -2157,10 +2207,9 @@ test("table command group supports profile presets for structured sheets", async
 
     const payload = JSON.parse(result.stdout);
     assert.deepEqual(payload.keyFields, ["id"]);
-    assert.deepEqual(payload.rows, [
-      { row: 6, record: { id: 1001, name: "Alpha" } },
-      { row: 7, record: { id: 1002, name: "Beta-2" } },
-    ]);
+    assert.equal(payload.inserted, false);
+    assert.equal(payload.recordCount, 2);
+    assert.equal("rows" in payload, false);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

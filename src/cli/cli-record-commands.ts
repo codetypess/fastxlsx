@@ -16,6 +16,8 @@ import { parseBooleanValue, parsePositiveInteger, resolveFrom, resolveOutputPath
 import type { CliCommandIo } from "./cli-shared.js";
 import { Workbook } from "../workbook.js";
 
+type WorkbookSheet = ReturnType<Workbook["getSheet"]>;
+
 export function registerRecordCommands(
   program: Command,
   io: CliCommandIo,
@@ -404,10 +406,9 @@ export function registerRecordCommands(
         writeJson(io.stdout, {
           action: "sheet.records.append",
           appended: records.length,
-          headers: sheet.getHeaders(options.headerRow),
           input: inputPath,
           output: outputPath,
-          records: sheet.getRecords(options.headerRow),
+          recordCount: countSheetRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -446,10 +447,9 @@ export function registerRecordCommands(
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "sheet.records.replace",
-          headers: sheet.getHeaders(options.headerRow),
           input: inputPath,
           output: outputPath,
-          records: sheet.getRecords(options.headerRow),
+          recordCount: countSheetRecords(sheet, options.headerRow),
           replaced: records.length,
           sheet: options.sheet,
         });
@@ -1592,7 +1592,7 @@ export function registerRecordCommands(
           action: "importJson",
           input: inputPath,
           output: outputPath,
-          records: sheet.toJson(options.headerRow),
+          recordCount: countSheetRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -1631,7 +1631,7 @@ export function registerRecordCommands(
           action: "importCsv",
           input: inputPath,
           output: outputPath,
-          records: sheet.toJson(options.headerRow),
+          recordCount: countSheetRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -1666,13 +1666,12 @@ export function registerRecordCommands(
         const record = parseJsonCellRecord(options.record, "--record");
         sheet.addRecord(record, options.headerRow);
         await workbook.save(outputPath);
-        const result = await getRecords(outputPath, options.sheet, options.headerRow);
         writeJson(io.stdout, {
           action: "addRecord",
           input: inputPath,
           output: outputPath,
           record,
-          records: result.records,
+          recordCount: countSheetRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -1753,7 +1752,7 @@ export function registerRecordCommands(
           action: "setRecords",
           input: inputPath,
           output: outputPath,
-          records: (await getRecords(outputPath, options.sheet, options.headerRow)).records,
+          recordCount: countSheetRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -1791,12 +1790,16 @@ export function registerRecordCommands(
           action: "deleteRecord",
           input: inputPath,
           output: outputPath,
-          records: (await getRecords(outputPath, options.sheet, options.headerRow)).records,
+          recordCount: countSheetRecords(sheet, options.headerRow),
           row: options.row,
           sheet: options.sheet,
         });
       },
     );
+}
+
+function countSheetRecords(sheet: WorkbookSheet, headerRow: number): number {
+  return sheet.getRecords(headerRow).length;
 }
 
 function parseSheetTransferFormat(value: string): "json" | "csv" {

@@ -57,6 +57,16 @@ fastxlsx inspect path/to/file.xlsx
 fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 ```
 
+Use plain sheet read commands for ordinary `.xlsx` sheet content. For non-profile workbooks, this is the default way to read a sheet unless the user has identified a structured table layout:
+
+```bash
+fastxlsx sheet records list path/to/file.xlsx --sheet Data --header-row 1
+fastxlsx sheet export path/to/file.xlsx --sheet Data --format json
+fastxlsx sheet export path/to/file.xlsx --sheet Data --format csv --output rows.csv
+```
+
+Do not use `table inspect`, `table list`, or `table get` merely to read an arbitrary worksheet. `table` is for structured sheets where a profile already exists or the header row, data start row, and key fields are explicitly known.
+
 Use `set` for single-cell edits:
 
 ```bash
@@ -86,7 +96,7 @@ Use `apply` only when the change genuinely spans multiple actions. Single-cell o
 
 For `apply --ops`, read [OPS-SCHEMA.md](OPS-SCHEMA.md).
 
-Use `sheet import` and `sheet records` for plain header-mapped sheets:
+Use `sheet import` and `sheet records` for plain header-mapped sheet writes:
 
 ```bash
 fastxlsx sheet import path/to/file.xlsx --sheet Data --format json --from rows.json --mode update --key-field id --output out.xlsx
@@ -114,7 +124,7 @@ fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.j
 fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.json --mode upsert --output out.xlsx
 ```
 
-Use `table` for structured sheets with explicit header and data row boundaries:
+Use `table` for structured sheets with explicit header and data row boundaries, not as the generic sheet reader:
 
 ```bash
 fastxlsx table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6

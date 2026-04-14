@@ -12,9 +12,10 @@ Keep this file short. Detailed workflow rules live in [WORKFLOW.md](WORKFLOW.md)
 ## When To Use
 
 - Inspecting `.xlsx` workbooks before editing
+- Plain sheet reads and exports through `sheet records` / `sheet export`
 - Single-cell edits and style updates
 - `config-table` updates
-- Structured `table` edits and profile-based workflows
+- Structured `table` edits and profile-based workflows only when profile or table boundaries are known
 - Deterministic multi-step edits through `apply --ops`
 - Roundtrip validation after workbook changes
 

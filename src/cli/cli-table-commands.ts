@@ -23,6 +23,8 @@ import {
   getStructuredTableRecord,
   getStructuredTableRows,
   inspectTable,
+  listConfigTableRows,
+  listStructuredTableRows,
   parseTableKey,
   pickKeyRecord,
   readConfigTableSyncInput,
@@ -36,6 +38,7 @@ import type { TableCommandContext } from "./cli-table.js";
 import { Workbook } from "../workbook.js";
 
 type ConfigTableSyncMode = "replace" | "update" | "upsert";
+type WorkbookSheet = ReturnType<Workbook["getSheet"]>;
 
 export function registerTableCommands(
   program: Command,
@@ -175,16 +178,19 @@ export function registerTableCommands(
           sheet.replaceRecord(matchedRow, record, options.headerRow);
         }
 
+        const row = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
+
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "configTable.upsert",
           input: inputPath,
+          inserted: matchedRow === null,
           matchField: options.field,
           matchValue,
           output: outputPath,
           record,
-          records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
-          row: findConfigTableRow(workbook.getSheet(options.sheet), options.headerRow, options.field, matchValue)?.row ?? null,
+          recordCount: countConfigTableRecords(sheet, options.headerRow),
+          row,
           sheet: options.sheet,
         });
       },
@@ -239,7 +245,7 @@ export function registerTableCommands(
           matchValue,
           output: outputPath,
           record,
-          records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          recordCount: countConfigTableRecords(sheet, options.headerRow),
           row,
           sheet: options.sheet,
           updated: row !== null,
@@ -292,7 +298,7 @@ export function registerTableCommands(
           matchField: options.field,
           matchValue,
           output: outputPath,
-          records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          recordCount: countConfigTableRecords(sheet, options.headerRow),
           row,
           sheet: options.sheet,
         });
@@ -333,7 +339,7 @@ export function registerTableCommands(
           action: "configTable.replace",
           input: inputPath,
           output: outputPath,
-          records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          recordCount: countConfigTableRecords(sheet, options.headerRow),
           sheet: options.sheet,
         });
       },
@@ -413,7 +419,7 @@ export function registerTableCommands(
           input: inputPath,
           mode: options.mode,
           output: outputPath,
-          rows: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          recordCount: countConfigTableRecords(sheet, options.headerRow),
           sheet: options.sheet,
           source: jsonPath,
         });
@@ -616,16 +622,21 @@ export function registerTableCommands(
           writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
         }
 
+        const row =
+          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
+
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "table.upsert",
           dataStartRow: context.dataStartRow,
           headerRow: context.headerRow,
           input: inputPath,
+          inserted: matchedRow === null,
           keyFields,
           output: outputPath,
           record,
-          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
+          row,
           sheet: context.sheet,
         });
       },
@@ -689,8 +700,8 @@ export function registerTableCommands(
           keyFields,
           output: outputPath,
           record,
+          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
           row,
-          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
           sheet: context.sheet,
           updated: row !== null,
         });
@@ -751,8 +762,8 @@ export function registerTableCommands(
           key: keyRecord,
           keyFields,
           output: outputPath,
+          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
           row,
-          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
           sheet: context.sheet,
         });
       },
@@ -847,12 +858,24 @@ export function registerTableCommands(
           input: inputPath,
           mode: options.mode,
           output: outputPath,
-          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
           sheet: context.sheet,
           source: jsonPath,
         });
       },
     );
+}
+
+function countConfigTableRecords(sheet: WorkbookSheet, headerRow: number): number {
+  return listConfigTableRows(sheet, headerRow).length;
+}
+
+function countStructuredTableRecords(
+  sheet: WorkbookSheet,
+  headerRow: number,
+  dataStartRow: number,
+): number {
+  return listStructuredTableRows(sheet, headerRow, dataStartRow).length;
 }
 
 function parseConfigTableSyncMode(value: string): ConfigTableSyncMode {
