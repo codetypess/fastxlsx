@@ -86,15 +86,31 @@ Use `apply` only when the change genuinely spans multiple actions. Single-cell o
 
 For `apply --ops`, read [OPS-SCHEMA.md](OPS-SCHEMA.md).
 
+Use `sheet import` and `sheet records` for plain header-mapped sheets:
+
+```bash
+fastxlsx sheet import path/to/file.xlsx --sheet Data --format json --from rows.json --mode update --key-field id --output out.xlsx
+fastxlsx sheet records update path/to/file.xlsx --sheet Data --key-field id --value 1001 --record '{"desc":"patched"}' --output out.xlsx
+fastxlsx sheet records upsert path/to/file.xlsx --sheet Data --key-field id --record '{"id":1001,"desc":"complete row"}' --output out.xlsx
+```
+
+Use `update` for partial matched-row edits. It only writes fields present in the input record and preserves omitted fields.
+
+Use `upsert` only when the payload contains the full row you want after the command. On matched rows, `upsert` replaces the row and clears omitted fields. On missing rows, `upsert` inserts a new row.
+
+Use `replace` only when the whole record set or table body should be rewritten.
+
 Use `config-table` for header-based config sheets where each row is a record under one header row:
 
 ```bash
 fastxlsx config-table init path/to/file.xlsx --sheet Config --headers '["Key","Value"]' --output out.xlsx
 fastxlsx config-table list path/to/file.xlsx --sheet Config
 fastxlsx config-table get path/to/file.xlsx --sheet Config --field Key --text timeout
+fastxlsx config-table update path/to/file.xlsx --sheet Config --field Key --text timeout --record '{"Value":"30"}' --output out.xlsx
 fastxlsx config-table upsert path/to/file.xlsx --sheet Config --field Key --record '{"Key":"timeout","Value":"30"}' --in-place
 fastxlsx config-table delete path/to/file.xlsx --sheet Config --field Key --text timeout --output out.xlsx
 fastxlsx config-table replace path/to/file.xlsx --sheet Config --records '[{"Key":"timeout","Value":"30"}]' --output out.xlsx
+fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.json --mode update --output out.xlsx
 fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.json --mode upsert --output out.xlsx
 ```
 
@@ -104,8 +120,10 @@ Use `table` for structured sheets with explicit header and data row boundaries:
 fastxlsx table inspect path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
 fastxlsx table list path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6
 fastxlsx table get path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key 1001 --key-field id
+fastxlsx table update path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --key 1001 --record '{"desc":"patched"}' --output out.xlsx
 fastxlsx table upsert path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --record '{"id":1001,"desc":"..."}' --in-place
 fastxlsx table delete path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key 1001 --key-field id --output out.xlsx
+fastxlsx table sync path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --from-json rows.json --mode update --output out.xlsx
 fastxlsx table sync path/to/file.xlsx --sheet main --header-row 1 --data-start-row 6 --key-field id --from-json rows.json --mode replace --output out.xlsx
 ```
 
@@ -121,7 +139,9 @@ Profiles matter because they freeze the agreed sheet name, header row, data star
 fastxlsx table list res/task.xlsx --profile 'task#main'
 fastxlsx table get res/task.xlsx --profile 'task#conf' --key '"GATE_SIEGE_TIME"'
 fastxlsx table get res/task.xlsx --profile 'task#define' --key '{"key1":"TASK_TYPE","key2":"MAIN"}'
+fastxlsx table update res/task.xlsx --profile 'task#main' --key 1001 --record '{"desc":"patched"}' --in-place
 fastxlsx table upsert res/task.xlsx --profile 'task#main' --record '{"id":1001,"desc":"..."}' --in-place
+fastxlsx table sync res/task.xlsx --profile 'task#conf' --from-json conf.json --mode update --output out.xlsx
 fastxlsx table sync res/task.xlsx --profile 'task#conf' --from-json conf.json --mode upsert --output out.xlsx
 ```
 

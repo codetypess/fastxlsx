@@ -3409,23 +3409,29 @@ test("record APIs can replace the full record set", async () => {
   assert.doesNotMatch(sheetXml, /<row r="4">/);
 });
 
-test("record key APIs can get, upsert, and delete by field", async () => {
+test("record key APIs can get, update, upsert, and delete by field", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = await loadFixtureEntries(fixtureDir);
   const workbook = Workbook.fromEntries(entries);
   const sheet = workbook.getSheet("Sheet1");
 
-  sheet.setRow(1, ["id", "name"]);
+  sheet.setRow(1, ["id", "name", "note"]);
   sheet.addRecords([
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta" },
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second" },
   ]);
 
-  assert.deepEqual(sheet.getRecordBy("id", 1002), { id: 1002, name: "Beta" });
+  assert.deepEqual(sheet.getRecordBy("id", 1002), { id: 1002, name: "Beta", note: "second" });
 
+  const patchedRow = sheet.updateRecordBy("id", 1001, { note: "first-2" });
   const updatedRow = sheet.upsertRecord("id", { id: 1002, name: "Beta-2" });
   const insertedRow = sheet.upsertRecord("id", { id: 1003, name: "Gamma" });
 
+  assert.deepEqual(patchedRow, {
+    record: { note: "first-2" },
+    row: 2,
+    updated: true,
+  });
   assert.deepEqual(updatedRow, {
     inserted: false,
     record: { id: 1002, name: "Beta-2" },
@@ -3437,21 +3443,21 @@ test("record key APIs can get, upsert, and delete by field", async () => {
     row: 4,
   });
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta-2" },
-    { id: 1003, name: "Gamma" },
+    { id: 1001, name: "Alpha", note: "first-2" },
+    { id: 1002, name: "Beta-2", note: null },
+    { id: 1003, name: "Gamma", note: null },
   ]);
 
   assert.equal(sheet.deleteRecordBy("id", 1001), true);
   assert.equal(sheet.deleteRecordBy("id", 9999), false);
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1002, name: "Beta-2" },
-    { id: 1003, name: "Gamma" },
+    { id: 1002, name: "Beta-2", note: null },
+    { id: 1003, name: "Gamma", note: null },
   ]);
 
-  assert.deepEqual(sheet.findRecordBy("id", 1002), { id: 1002, name: "Beta-2" });
+  assert.deepEqual(sheet.findRecordBy("id", 1002), { id: 1002, name: "Beta-2", note: null });
   assert.equal(sheet.removeRecordBy("id", 1003), true);
-  assert.deepEqual(sheet.getRecords(), [{ id: 1002, name: "Beta-2" }]);
+  assert.deepEqual(sheet.getRecords(), [{ id: 1002, name: "Beta-2", note: null }]);
 });
 
 test("sheet JSON helpers roundtrip header-mapped records", async () => {
@@ -3505,21 +3511,39 @@ test("sheet CSV helpers support export and import options", async () => {
   );
 });
 
-test("sheet JSON helpers support header order and append/upsert options", async () => {
+test("sheet JSON and CSV helpers support append, update, and upsert semantics", async () => {
   const workbook = Workbook.create("Data");
   const sheet = workbook.getSheet("Data");
 
   sheet.fromJson(
-    [{ name: "Alpha", id: 1001 }],
-    { headerOrder: ["id", "name"] },
+    [{ name: "Alpha", id: 1001, note: "first" }],
+    { headerOrder: ["id", "name", "note"] },
   );
-  assert.deepEqual(sheet.getHeaders(), ["id", "name"]);
-  assert.deepEqual(sheet.getRecords(), [{ id: 1001, name: "Alpha" }]);
+  assert.deepEqual(sheet.getHeaders(), ["id", "name", "note"]);
+  assert.deepEqual(sheet.getRecords(), [{ id: 1001, name: "Alpha", note: "first" }]);
 
-  sheet.fromJson([{ id: 1002, name: "Beta" }], { mode: "append" });
+  sheet.fromJson([{ id: 1002, name: "Beta", note: "second" }], { mode: "append" });
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta" },
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second" },
+  ]);
+
+  sheet.fromJson([{ id: 1002, note: "second-patched" }], {
+    keyField: "id",
+    mode: "update",
+  });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second-patched" },
+  ]);
+
+  sheet.fromCsv("id,note\n1001,first-csv\n", {
+    keyField: "id",
+    mode: "update",
+  });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha", note: "first-csv" },
+    { id: 1002, name: "Beta", note: "second-patched" },
   ]);
 
   sheet.fromJson([{ id: 1002, name: "Beta-2" }], {
@@ -3527,8 +3551,8 @@ test("sheet JSON helpers support header order and append/upsert options", async 
     mode: "upsert",
   });
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta-2" },
+    { id: 1001, name: "Alpha", note: "first-csv" },
+    { id: 1002, name: "Beta-2", note: null },
   ]);
 });
 
@@ -3537,11 +3561,11 @@ test("sheet record workflow APIs import, export, and sync records", async () => 
   const sheet = workbook.getSheet("Data");
 
   const replaced = sheet.importRecords([
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta" },
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second" },
   ]);
   assert.deepEqual(replaced, {
-    headers: ["id", "name"],
+    headers: ["id", "name", "note"],
     imported: 2,
     inserted: 2,
     mode: "replace",
@@ -3550,14 +3574,14 @@ test("sheet record workflow APIs import, export, and sync records", async () => 
   });
 
   assert.deepEqual(sheet.exportRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta" },
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second" },
   ]);
-  assert.equal(sheet.exportRecords({ format: "csv" }), "id,name\n1001,Alpha\n1002,Beta");
+  assert.equal(sheet.exportRecords({ format: "csv" }), "id,name,note\n1001,Alpha,first\n1002,Beta,second");
 
-  const appended = sheet.importRecords([{ id: 1003, name: "Gamma" }], { mode: "append" });
+  const appended = sheet.importRecords([{ id: 1003, name: "Gamma", note: "third" }], { mode: "append" });
   assert.deepEqual(appended, {
-    headers: ["id", "name"],
+    headers: ["id", "name", "note"],
     imported: 1,
     inserted: 1,
     mode: "append",
@@ -3565,20 +3589,38 @@ test("sheet record workflow APIs import, export, and sync records", async () => 
     updated: 0,
   });
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta" },
-    { id: 1003, name: "Gamma" },
+    { id: 1001, name: "Alpha", note: "first" },
+    { id: 1002, name: "Beta", note: "second" },
+    { id: 1003, name: "Gamma", note: "third" },
+  ]);
+
+  const updated = sheet.importRecords([{ id: 1001, note: "first-updated" }, { id: 9999, note: "missing" }], {
+    keyField: "id",
+    mode: "update",
+  });
+  assert.deepEqual(updated, {
+    headers: ["id", "name", "note"],
+    imported: 2,
+    inserted: 0,
+    mode: "update",
+    rowCount: 3,
+    updated: 1,
+  });
+  assert.deepEqual(sheet.getRecords(), [
+    { id: 1001, name: "Alpha", note: "first-updated" },
+    { id: 1002, name: "Beta", note: "second" },
+    { id: 1003, name: "Gamma", note: "third" },
   ]);
 
   const synced = sheet.syncRecords(
     [
       { id: 1002, name: "Beta-2" },
-      { id: 1004, name: "Delta" },
+      { id: 1004, name: "Delta", note: "fourth" },
     ],
     { keyField: "id" },
   );
   assert.deepEqual(synced, {
-    headers: ["id", "name"],
+    headers: ["id", "name", "note"],
     imported: 2,
     inserted: 1,
     mode: "upsert",
@@ -3586,10 +3628,10 @@ test("sheet record workflow APIs import, export, and sync records", async () => 
     updated: 1,
   });
   assert.deepEqual(sheet.getRecords(), [
-    { id: 1001, name: "Alpha" },
-    { id: 1002, name: "Beta-2" },
-    { id: 1003, name: "Gamma" },
-    { id: 1004, name: "Delta" },
+    { id: 1001, name: "Alpha", note: "first-updated" },
+    { id: 1002, name: "Beta-2", note: null },
+    { id: 1003, name: "Gamma", note: "third" },
+    { id: 1004, name: "Delta", note: "fourth" },
   ]);
 });
 

@@ -49,6 +49,7 @@ export type {
   SheetExportRecordsOptions,
   SheetImportRecordsOptions,
   SheetImportRecordsResult,
+  SheetUpdateRecordResult,
   SheetSelection,
   SheetPrintTitles,
   SheetProtection,

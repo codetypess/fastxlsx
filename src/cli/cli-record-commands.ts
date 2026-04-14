@@ -80,13 +80,14 @@ export function registerRecordCommands(
 
   sheetCommand
     .command("import")
+    .description("Import records with replace, append, update, or upsert semantics")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--format <format>", "import format: json or csv")
     .requiredOption("--from <file>", "source json/csv file")
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--key-field <name>", "key field used for upsert mode")
-    .option("--mode <mode>", "import mode: replace, append, or upsert")
+    .option("--key-field <name>", "key field used for update or upsert mode")
+    .option("--mode <mode>", "replace rewrites records; append adds rows; update patches matched rows; upsert inserts missing rows and replaces matched rows")
     .option("--trim-values", "trim CSV cell values before import")
     .option("--no-trim-headers", "preserve CSV header whitespace")
     .option("--no-infer-types", "keep imported CSV values as strings")
@@ -457,10 +458,11 @@ export function registerRecordCommands(
 
   sheetRecordsCommand
     .command("upsert")
+    .description("Insert by key or replace a matched row")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--key-field <name>", "key field used to match the record")
-    .requiredOption("--record <json>", "JSON object keyed by header names")
+    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are cleared on matched rows")
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
@@ -488,6 +490,58 @@ export function registerRecordCommands(
         await workbook.save(outputPath);
         writeJson(io.stdout, {
           action: "sheet.records.upsert",
+          input: inputPath,
+          output: outputPath,
+          result,
+          row: result.row,
+          sheet: options.sheet,
+        });
+      },
+    );
+
+  sheetRecordsCommand
+    .command("update")
+    .description("Patch a matched row without clearing omitted fields")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--key-field <name>", "key field used to match the record")
+    .option("--value <json>", "JSON scalar key value")
+    .option("--text <value>", "plain string key value")
+    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are preserved")
+    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          headerRow: number;
+          inPlace?: boolean;
+          keyField: string;
+          output?: string;
+          record: string;
+          sheet: string;
+          text?: string;
+          value?: string;
+        },
+      ) => {
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const record = parseJsonCellRecord(options.record, "--record");
+        const result = sheet.updateRecordBy(
+          options.keyField,
+          resolveMatchValue(options.value, options.text),
+          record,
+          options.headerRow,
+        );
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "sheet.records.update",
           input: inputPath,
           output: outputPath,
           result,
@@ -1753,16 +1807,16 @@ function parseSheetTransferFormat(value: string): "json" | "csv" {
   throw new Error(`Expected --format to be json or csv, got: ${value}`);
 }
 
-function parseSheetImportMode(value?: string): "append" | "replace" | "upsert" | undefined {
+function parseSheetImportMode(value?: string): "append" | "replace" | "update" | "upsert" | undefined {
   if (value === undefined) {
     return undefined;
   }
 
-  if (value === "append" || value === "replace" || value === "upsert") {
+  if (value === "append" || value === "replace" || value === "update" || value === "upsert") {
     return value;
   }
 
-  throw new Error(`Expected --mode to be append, replace, or upsert, got: ${value}`);
+  throw new Error(`Expected --mode to be append, replace, update, or upsert, got: ${value}`);
 }
 
 function parseCsvAsRecords(

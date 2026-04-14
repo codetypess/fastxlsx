@@ -35,7 +35,7 @@ import {
 import type { TableCommandContext } from "./cli-table.js";
 import { Workbook } from "../workbook.js";
 
-type ConfigTableSyncMode = "replace" | "upsert";
+type ConfigTableSyncMode = "replace" | "update" | "upsert";
 
 export function registerTableCommands(
   program: Command,
@@ -129,10 +129,11 @@ export function registerTableCommands(
 
   configTable
     .command("upsert")
+    .description("Insert by key or replace a matched config row")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--field <name>", "header field used as the match key")
-    .requiredOption("--record <json>", "JSON object keyed by header names")
+    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are cleared on matched rows")
     .option("--match-value <json>", "JSON scalar override for the lookup value")
     .option("--match-text <value>", "plain string override for the lookup value")
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
@@ -171,7 +172,7 @@ export function registerTableCommands(
         if (matchedRow === null) {
           sheet.addRecord(record, options.headerRow);
         } else {
-          sheet.setRecord(matchedRow, record, options.headerRow);
+          sheet.replaceRecord(matchedRow, record, options.headerRow);
         }
 
         await workbook.save(outputPath);
@@ -185,6 +186,63 @@ export function registerTableCommands(
           records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
           row: findConfigTableRow(workbook.getSheet(options.sheet), options.headerRow, options.field, matchValue)?.row ?? null,
           sheet: options.sheet,
+        });
+      },
+    );
+
+  configTable
+    .command("update")
+    .description("Patch a matched config row without clearing omitted fields")
+    .argument("<file>", "input xlsx file")
+    .requiredOption("--sheet <name>", "sheet name")
+    .requiredOption("--field <name>", "header field used as the lookup key")
+    .option("--value <json>", "JSON scalar value to match")
+    .option("--text <value>", "plain string value to match")
+    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are preserved")
+    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          field: string;
+          headerRow: number;
+          inPlace?: boolean;
+          output?: string;
+          record: string;
+          sheet: string;
+          text?: string;
+          value?: string;
+        },
+      ) => {
+        const matchValue = resolveMatchValue(options.value, options.text);
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(options.sheet);
+        const record = parseJsonCellRecord(options.record, "--record");
+        const row = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
+
+        if (row !== null) {
+          sheet.setRecord(row, record, options.headerRow);
+        }
+
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "configTable.update",
+          input: inputPath,
+          matchField: options.field,
+          matchValue,
+          output: outputPath,
+          record,
+          records: (await getConfigTableRows(outputPath, options.sheet, options.headerRow)).rows,
+          row,
+          sheet: options.sheet,
+          updated: row !== null,
         });
       },
     );
@@ -243,6 +301,7 @@ export function registerTableCommands(
 
   configTable
     .command("replace")
+    .description("Replace the full config record set below the header row")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--records <json>", "JSON array of record objects")
@@ -282,13 +341,14 @@ export function registerTableCommands(
 
   configTable
     .command("sync")
+    .description("Sync config rows with replace, update, or upsert semantics")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
     .requiredOption("--from-json <file>", "JSON file containing records or a config object")
     .option("--field <name>", "header field used as the key when normalizing config objects", "Key")
     .option("--value-field <name>", "header field used for scalar config object values", "Value")
     .option("--headers <json>", "JSON array of header strings")
-    .option("--mode <mode>", "sync mode: replace or upsert", parseConfigTableSyncMode, "replace")
+    .option("--mode <mode>", "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows", parseConfigTableSyncMode, "replace")
     .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
@@ -335,9 +395,13 @@ export function registerTableCommands(
             const matchedRow = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
 
             if (matchedRow === null) {
-              sheet.addRecord(record, options.headerRow);
-            } else {
+              if (options.mode === "upsert") {
+                sheet.addRecord(record, options.headerRow);
+              }
+            } else if (options.mode === "update") {
               sheet.setRecord(matchedRow, record, options.headerRow);
+            } else {
+              sheet.replaceRecord(matchedRow, record, options.headerRow);
             }
           }
         }
@@ -506,11 +570,12 @@ export function registerTableCommands(
 
   table
     .command("upsert")
+    .description("Insert by key or replace a matched structured row")
     .argument("<file>", "input xlsx file")
     .option("--sheet <name>", "sheet name")
     .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
     .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--record <json>", "JSON object keyed by field names")
+    .requiredOption("--record <json>", "JSON object keyed by field names; omitted fields are cleared on matched rows")
     .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
     .option("--profile <name>", "table profile name")
     .option("--profiles-file <file>", "JSON file containing table profiles")
@@ -562,6 +627,72 @@ export function registerTableCommands(
           record,
           rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
           sheet: context.sheet,
+        });
+      },
+    );
+
+  table
+    .command("update")
+    .description("Patch a matched structured row without clearing omitted fields")
+    .argument("<file>", "input xlsx file")
+    .option("--sheet <name>", "sheet name")
+    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+    .requiredOption("--record <json>", "JSON object keyed by field names; omitted fields are preserved")
+    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+    .option("--profile <name>", "table profile name")
+    .option("--profiles-file <file>", "JSON file containing table profiles")
+    .option("--output <file>", "output xlsx path")
+    .option("--in-place", "overwrite the input workbook")
+    .action(
+      async (
+        file: string,
+        options: {
+          dataStartRow?: number;
+          headerRow?: number;
+          inPlace?: boolean;
+          key: string;
+          keyField: string[];
+          output?: string;
+          profile?: string;
+          profilesFile?: string;
+          record: string;
+          sheet?: string;
+        },
+      ) => {
+        const context = await resolveCliTableCommandContext(io.cwd, options);
+        const inputPath = resolveFrom(io.cwd, file);
+        const outputPath = resolveOutputPath(inputPath, {
+          inPlace: options.inPlace === true,
+          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+        });
+        const workbook = await Workbook.open(inputPath);
+        const sheet = workbook.getSheet(context.sheet);
+        const record = parseJsonCellRecord(options.record, "--record");
+        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
+        const keyRecord = parseTableKey(options.key, keyFields, "--key");
+        const row =
+          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
+
+        if (row !== null) {
+          sheet.setRecord(row, record, context.headerRow);
+        }
+
+        await workbook.save(outputPath);
+        writeJson(io.stdout, {
+          action: "table.update",
+          dataStartRow: context.dataStartRow,
+          headerRow: context.headerRow,
+          input: inputPath,
+          key: keyRecord,
+          keyFields,
+          output: outputPath,
+          record,
+          row,
+          rows: (await getStructuredTableRows(outputPath, context.sheet, context.headerRow, context.dataStartRow)).rows,
+          sheet: context.sheet,
+          updated: row !== null,
         });
       },
     );
@@ -629,6 +760,7 @@ export function registerTableCommands(
 
   table
     .command("sync")
+    .description("Sync structured rows with replace, update, or upsert semantics")
     .argument("<file>", "input xlsx file")
     .option("--sheet <name>", "sheet name")
     .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
@@ -639,7 +771,7 @@ export function registerTableCommands(
     .option("--profiles-file <file>", "JSON file containing table profiles")
     .option("--value-field <name>", "field name used when normalizing scalar config objects", "Value")
     .option("--headers <json>", "JSON array of header strings")
-    .option("--mode <mode>", "sync mode: replace or upsert", parseConfigTableSyncMode, "replace")
+    .option("--mode <mode>", "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows", parseConfigTableSyncMode, "replace")
     .option("--output <file>", "output xlsx path")
     .option("--in-place", "overwrite the input workbook")
     .action(
@@ -696,7 +828,11 @@ export function registerTableCommands(
               null;
 
             if (matchedRow === null) {
-              sheet.addRecord(record, context.headerRow);
+              if (options.mode === "upsert") {
+                sheet.addRecord(record, context.headerRow);
+              }
+            } else if (options.mode === "update") {
+              sheet.setRecord(matchedRow, record, context.headerRow);
             } else {
               writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
             }
@@ -720,11 +856,11 @@ export function registerTableCommands(
 }
 
 function parseConfigTableSyncMode(value: string): ConfigTableSyncMode {
-  if (value === "replace" || value === "upsert") {
+  if (value === "replace" || value === "update" || value === "upsert") {
     return value;
   }
 
-  throw new InvalidArgumentError(`Expected replace or upsert, got: ${value}`);
+  throw new InvalidArgumentError(`Expected replace, update, or upsert, got: ${value}`);
 }
 
 function parseRegex(value: string): RegExp {

@@ -371,9 +371,15 @@ export interface SheetImportRecordsResult {
   headers: string[];
   imported: number;
   inserted: number;
-  mode: "append" | "replace" | "upsert";
+  mode: "append" | "replace" | "update" | "upsert";
   rowCount: number;
   updated: number;
+}
+
+export interface SheetUpdateRecordResult {
+  record: Record<string, CellValue>;
+  row: number | null;
+  updated: boolean;
 }
 
 export interface SheetUpsertRecordResult {
@@ -460,7 +466,7 @@ export interface SheetImportRecordsOptions {
   headerOrder?: string[];
   inferTypes?: boolean;
   keyField?: string;
-  mode?: "append" | "replace" | "upsert";
+  mode?: "append" | "replace" | "update" | "upsert";
   trimHeaders?: boolean;
   trimValues?: boolean;
 }

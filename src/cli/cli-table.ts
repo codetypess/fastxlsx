@@ -427,14 +427,14 @@ export function resolveConfigTableHeaders(
     return explicitHeaders;
   }
 
+  const existingHeaders = trimTrailingEmptyStrings(sheet.getHeaders(headerRow));
+  if (existingHeaders.length > 0) {
+    return mergeHeaders(existingHeaders, inferHeadersFromRecords(records));
+  }
+
   const inferredHeaders = inferHeadersFromRecords(records);
   if (inferredHeaders.length > 0) {
     return inferredHeaders;
-  }
-
-  const existingHeaders = trimTrailingEmptyStrings(sheet.getHeaders(headerRow));
-  if (existingHeaders.length > 0) {
-    return existingHeaders;
   }
 
   throw new Error("Unable to determine headers; provide --headers or include records with keys");
@@ -588,6 +588,20 @@ function inferHeadersFromRecords(records: CellRecord[]): string[] {
         seen.add(key);
         headers.push(key);
       }
+    }
+  }
+
+  return headers;
+}
+
+function mergeHeaders(existingHeaders: string[], inferredHeaders: string[]): string[] {
+  const headers = [...existingHeaders];
+  const seen = new Set(headers);
+
+  for (const header of inferredHeaders) {
+    if (!seen.has(header)) {
+      seen.add(header);
+      headers.push(header);
     }
   }
 

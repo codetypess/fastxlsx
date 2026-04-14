@@ -714,6 +714,57 @@ test("workflow-oriented sheet commands handle import/export and comments", async
   }
 });
 
+test("workflow-oriented sheet import update mode patches matched records only", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = join(tempRoot, "input.xlsx");
+    const jsonPath = join(tempRoot, "patch.json");
+    const outputPath = join(tempRoot, "patched.xlsx");
+    const workbook = Workbook.create("Sheet1");
+    workbook.getSheet("Sheet1").setRecords([{ id: 1001, name: "Alpha", note: "first" }]);
+    await workbook.save(inputPath);
+    await writeFile(
+      jsonPath,
+      `${JSON.stringify([{ id: 1001, note: "patched" }, { id: 9999, note: "missing" }], null, 2)}\n`,
+    );
+
+    const result = await runCliCapture([
+      "sheet",
+      "import",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--format",
+      "json",
+      "--from",
+      jsonPath,
+      "--mode",
+      "update",
+      "--key-field",
+      "id",
+      "--output",
+      outputPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).result, {
+      headers: ["id", "name", "note"],
+      imported: 2,
+      inserted: 0,
+      mode: "update",
+      rowCount: 1,
+      updated: 1,
+    });
+
+    const patchedWorkbook = await Workbook.open(outputPath);
+    assert.deepEqual(patchedWorkbook.getSheet("Sheet1").getRecords(), [
+      { id: 1001, name: "Alpha", note: "patched" },
+    ]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("workflow-oriented sheet import/export commands support CSV formatting options", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
@@ -769,12 +820,13 @@ test("workflow-oriented sheet import/export commands support CSV formatting opti
   }
 });
 
-test("workflow-oriented sheet record upsert command inserts and updates by key", async () => {
+test("workflow-oriented sheet record upsert replaces matched rows and update patches them", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
     const inputPath = join(tempRoot, "input.xlsx");
     const outputPath = join(tempRoot, "records-upsert.xlsx");
+    const updatedPath = join(tempRoot, "records-update.xlsx");
 
     let result = await runCliCapture([
       "create",
@@ -794,14 +846,14 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
       "--key-field",
       "id",
       "--record",
-      '{"id":1001,"name":"Alpha"}',
+      '{"id":1001,"name":"Alpha","note":"first"}',
       "--output",
       outputPath,
     ]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout).result, {
       inserted: true,
-      record: { id: 1001, name: "Alpha" },
+      record: { id: 1001, name: "Alpha", note: "first" },
       row: 2,
     });
 
@@ -816,7 +868,8 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
       "id",
       "--record",
       '{"id":1001,"name":"Alpha-2"}',
-      "--in-place",
+      "--output",
+      updatedPath,
     ]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout).result, {
@@ -829,7 +882,7 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
       "sheet",
       "records",
       "get",
-      outputPath,
+      updatedPath,
       "--sheet",
       "Sheet1",
       "--key-field",
@@ -841,13 +894,55 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
     assert.deepEqual(JSON.parse(result.stdout).record, {
       id: 1001,
       name: "Alpha-2",
+      note: null,
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "update",
+      updatedPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--value",
+      "1001",
+      "--record",
+      '{"note":"restored"}',
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).result, {
+      record: { note: "restored" },
+      row: 2,
+      updated: true,
+    });
+
+    result = await runCliCapture([
+      "sheet",
+      "records",
+      "get",
+      updatedPath,
+      "--sheet",
+      "Sheet1",
+      "--key-field",
+      "id",
+      "--value",
+      "1001",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).record, {
+      id: 1001,
+      name: "Alpha-2",
+      note: "restored",
     });
 
     result = await runCliCapture([
       "sheet",
       "records",
       "delete",
-      outputPath,
+      updatedPath,
       "--sheet",
       "Sheet1",
       "--key-field",
@@ -863,7 +958,7 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
       "sheet",
       "records",
       "get",
-      outputPath,
+      updatedPath,
       "--sheet",
       "Sheet1",
       "--key-field",
@@ -874,8 +969,8 @@ test("workflow-oriented sheet record upsert command inserts and updates by key",
     assert.equal(result.exitCode, 0);
     assert.equal(JSON.parse(result.stdout).record, null);
 
-    const workbook = await Workbook.open(outputPath);
-    assert.deepEqual(workbook.getSheet("Sheet1").getHeaders(), ["id", "name"]);
+    const workbook = await Workbook.open(updatedPath);
+    assert.deepEqual(workbook.getSheet("Sheet1").getHeaders(), ["id", "name", "note"]);
     assert.deepEqual(workbook.getSheet("Sheet1").getRecords(), []);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
@@ -1497,6 +1592,7 @@ test("config-table command group supports high-level config workflows", async ()
     const inputPath = await writeFixtureWorkbook(tempRoot);
     const initializedPath = join(tempRoot, "config-init.xlsx");
     const upsertedPath = join(tempRoot, "config-upserted.xlsx");
+    const updatedPath = join(tempRoot, "config-updated.xlsx");
     const deletedPath = join(tempRoot, "config-deleted.xlsx");
     const replacedPath = join(tempRoot, "config-replaced.xlsx");
 
@@ -1507,7 +1603,7 @@ test("config-table command group supports high-level config workflows", async ()
       "--sheet",
       "Config",
       "--headers",
-      '["Key","Value"]',
+      '["Key","Value","Note"]',
       "--output",
       initializedPath,
     ]);
@@ -1522,7 +1618,7 @@ test("config-table command group supports high-level config workflows", async ()
       "--field",
       "Key",
       "--record",
-      '{"Key":"timeout","Value":"30"}',
+      '{"Key":"timeout","Value":"30","Note":"seconds"}',
       "--output",
       upsertedPath,
     ]);
@@ -1538,14 +1634,15 @@ test("config-table command group supports high-level config workflows", async ()
       "Key",
       "--record",
       '{"Key":"timeout","Value":"60"}',
-      "--in-place",
+      "--output",
+      updatedPath,
     ]);
     assert.equal(result.exitCode, 0);
 
     result = await runCliCapture([
       "config-table",
       "get",
-      upsertedPath,
+      updatedPath,
       "--sheet",
       "Config",
       "--field",
@@ -1555,14 +1652,48 @@ test("config-table command group supports high-level config workflows", async ()
     ]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout).record, {
-      record: { Key: "timeout", Value: "60" },
+      record: { Key: "timeout", Value: "60", Note: null },
+      row: 2,
+    });
+
+    result = await runCliCapture([
+      "config-table",
+      "update",
+      updatedPath,
+      "--sheet",
+      "Config",
+      "--field",
+      "Key",
+      "--text",
+      "timeout",
+      "--record",
+      '{"Note":"restored"}',
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).updated, true);
+
+    result = await runCliCapture([
+      "config-table",
+      "get",
+      updatedPath,
+      "--sheet",
+      "Config",
+      "--field",
+      "Key",
+      "--text",
+      "timeout",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).record, {
+      record: { Key: "timeout", Value: "60", Note: "restored" },
       row: 2,
     });
 
     result = await runCliCapture([
       "config-table",
       "delete",
-      upsertedPath,
+      updatedPath,
       "--sheet",
       "Config",
       "--field",
@@ -1597,22 +1728,22 @@ test("config-table command group supports high-level config workflows", async ()
     ]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout).rows, [
-      { row: 2, record: { Key: "region", Value: "cn" } },
-      { row: 3, record: { Key: "retries", Value: "3" } },
+      { row: 2, record: { Key: "region", Value: "cn", Note: null } },
+      { row: 3, record: { Key: "retries", Value: "3", Note: null } },
     ]);
 
     const workbook = await Workbook.open(replacedPath);
-    assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value"]);
+    assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value", "Note"]);
     assert.deepEqual(workbook.getSheet("Config").getRecords(), [
-      { Key: "region", Value: "cn" },
-      { Key: "retries", Value: "3" },
+      { Key: "region", Value: "cn", Note: null },
+      { Key: "retries", Value: "3", Note: null },
     ]);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("config-table sync imports JSON config objects in replace and upsert modes", async () => {
+test("config-table sync imports JSON config objects in replace, update, and upsert modes", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
   try {
@@ -1620,6 +1751,7 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
     const replaceJsonPath = join(tempRoot, "replace.json");
     const replaceOutputPath = join(tempRoot, "sync-replace.xlsx");
     const upsertJsonPath = join(tempRoot, "upsert.json");
+    const updateJsonPath = join(tempRoot, "update.json");
 
     await writeFile(
       replaceJsonPath,
@@ -1646,6 +1778,18 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
     ]);
     assert.equal(result.exitCode, 0);
     assert.equal(JSON.parse(result.stdout).mode, "replace");
+
+    result = await runCliCapture([
+      "config-table",
+      "init",
+      replaceOutputPath,
+      "--sheet",
+      "Config",
+      "--headers",
+      '["Key","Value","Note"]',
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
 
     await writeFile(
       upsertJsonPath,
@@ -1674,6 +1818,26 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
     assert.equal(result.exitCode, 0);
     assert.equal(JSON.parse(result.stdout).mode, "upsert");
 
+    await writeFile(
+      updateJsonPath,
+      `${JSON.stringify([{ Key: "timeout", Note: "patched" }, { Key: "missing", Note: "ignored" }], null, 2)}\n`,
+    );
+
+    result = await runCliCapture([
+      "config-table",
+      "sync",
+      replaceOutputPath,
+      "--sheet",
+      "Config",
+      "--from-json",
+      updateJsonPath,
+      "--mode",
+      "update",
+      "--in-place",
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).mode, "update");
+
     result = await runCliCapture([
       "config-table",
       "list",
@@ -1683,17 +1847,17 @@ test("config-table sync imports JSON config objects in replace and upsert modes"
     ]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout).rows, [
-      { row: 2, record: { Key: "timeout", Value: "60" } },
-      { row: 3, record: { Key: "region", Value: "cn" } },
-      { row: 4, record: { Key: "retries", Value: "3" } },
+      { row: 2, record: { Key: "timeout", Value: "60", Note: "patched" } },
+      { row: 3, record: { Key: "region", Value: "cn", Note: null } },
+      { row: 4, record: { Key: "retries", Value: "3", Note: null } },
     ]);
 
     const workbook = await Workbook.open(replaceOutputPath);
-    assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value"]);
+    assert.deepEqual(workbook.getSheet("Config").getHeaders(), ["Key", "Value", "Note"]);
     assert.deepEqual(workbook.getSheet("Config").getRecords(), [
-      { Key: "timeout", Value: "60" },
-      { Key: "region", Value: "cn" },
-      { Key: "retries", Value: "3" },
+      { Key: "timeout", Value: "60", Note: "patched" },
+      { Key: "region", Value: "cn", Note: null },
+      { Key: "retries", Value: "3", Note: null },
     ]);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
@@ -1819,6 +1983,100 @@ test("table command group respects explicit data row boundaries", async () => {
     assert.deepEqual(sheet.getRow(5), ["###", "display"]);
     assert.deepEqual(sheet.getRecord(6, 1), { id: 1001, name: "Alpha-2" });
     assert.deepEqual(sheet.getRecord(7, 1), { id: 1003, name: "Gamma" });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("table update patches structured rows without clearing omitted fields", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = await writePatchStructuredTableWorkbook(tempRoot);
+    const upsertedPath = join(tempRoot, "table-upsert.xlsx");
+    const updatedPath = join(tempRoot, "table-update.xlsx");
+    const syncJsonPath = join(tempRoot, "table-update-sync.json");
+    const syncedPath = join(tempRoot, "table-update-sync.xlsx");
+
+    let result = await runCliCapture([
+      "table",
+      "upsert",
+      inputPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--record",
+      '{"id":1002,"name":"Beta-2"}',
+      "--output",
+      upsertedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).rows, [
+      { row: 6, record: { id: 1001, name: "Alpha", note: "first" } },
+      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
+    ]);
+
+    result = await runCliCapture([
+      "table",
+      "update",
+      upsertedPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--key",
+      "1001",
+      "--record",
+      '{"note":"first-patched"}',
+      "--output",
+      updatedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).updated, true);
+    assert.deepEqual(JSON.parse(result.stdout).rows, [
+      { row: 6, record: { id: 1001, name: "Alpha", note: "first-patched" } },
+      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
+    ]);
+
+    await writeFile(
+      syncJsonPath,
+      `${JSON.stringify([{ id: 1001, name: "Alpha-2" }, { id: 9999, note: "missing" }], null, 2)}\n`,
+    );
+
+    result = await runCliCapture([
+      "table",
+      "sync",
+      updatedPath,
+      "--sheet",
+      "Sheet1",
+      "--header-row",
+      "1",
+      "--data-start-row",
+      "6",
+      "--key-field",
+      "id",
+      "--from-json",
+      syncJsonPath,
+      "--mode",
+      "update",
+      "--output",
+      syncedPath,
+    ]);
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).mode, "update");
+    assert.deepEqual(JSON.parse(result.stdout).rows, [
+      { row: 6, record: { id: 1001, name: "Alpha-2", note: "first-patched" } },
+      { row: 7, record: { id: 1002, name: "Beta-2", note: null } },
+    ]);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -2788,6 +3046,23 @@ async function writeStructuredTableWorkbook(rootDirectory: string): Promise<stri
   sheet.setRow(5, ["###", "display"]);
   sheet.setRow(6, [1001, "Alpha"]);
   sheet.setRow(7, [1002, "Beta"]);
+
+  await workbook.save(inputPath);
+  return inputPath;
+}
+
+async function writePatchStructuredTableWorkbook(rootDirectory: string): Promise<string> {
+  const inputPath = await writeFixtureWorkbook(rootDirectory);
+  const workbook = await Workbook.open(inputPath);
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRow(1, ["id", "name", "note"]);
+  sheet.setRow(2, ["int", "string", "string"]);
+  sheet.setRow(3, [">>", "client", "client"]);
+  sheet.setRow(4, ["!!!", "x", "x"]);
+  sheet.setRow(5, ["###", "display", "display"]);
+  sheet.setRow(6, [1001, "Alpha", "first"]);
+  sheet.setRow(7, [1002, "Beta", "second"]);
 
   await workbook.save(inputPath);
   return inputPath;

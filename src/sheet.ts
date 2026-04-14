@@ -29,6 +29,7 @@ import type {
   SheetImportRecordsResult,
   SheetSelection,
   SheetPrintTitles,
+  SheetUpdateRecordResult,
   SheetUpsertRecordResult,
 } from "./types.js";
 import { XlsxError } from "./errors.js";
@@ -1003,7 +1004,7 @@ export class Sheet {
   }
 
   /**
-   * Replaces the current record set from JSON-ready objects.
+   * Imports JSON-ready records with replace, append, update, or upsert semantics.
    */
   fromJson(records: Array<Record<string, CellValue>>, headerRowNumber: number): void;
   fromJson(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions): void;
@@ -1014,7 +1015,7 @@ export class Sheet {
     const options = resolveSheetImportOptions(headerRowOrOptions);
     const normalizedRecords = normalizeImportedRecords(records, options);
 
-    if (options.mode === "append" || options.mode === "upsert") {
+    if (options.mode === "append" || options.mode === "update" || options.mode === "upsert") {
       this.importRecords(normalizedRecords, options);
       return;
     }
@@ -1048,7 +1049,7 @@ export class Sheet {
   }
 
   /**
-   * Replaces the current record set from CSV text using the first row as headers.
+   * Imports CSV records using the first row as headers.
    */
   fromCsv(csv: string, headerRowNumber: number): void;
   fromCsv(csv: string, options: SheetImportRecordsOptions): void;
@@ -1093,7 +1094,10 @@ export class Sheet {
   }
 
   /**
-   * Imports records with a higher-level workflow mode.
+   * Imports records with replace, append, update, or upsert workflow semantics.
+   *
+   * `update` only patches fields present in each record.
+   * `upsert` inserts missing rows and replaces matched rows, clearing omitted fields.
    */
   importRecords(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions = {}): SheetImportRecordsResult {
     const headerRow = options.headerRow ?? 1;
@@ -1126,7 +1130,28 @@ export class Sheet {
 
     const keyField = options.keyField;
     if (!keyField) {
-      throw new XlsxError("importRecords with mode=upsert requires keyField");
+      throw new XlsxError(`importRecords with mode=${mode} requires keyField`);
+    }
+
+    if (mode === "update") {
+      let updated = 0;
+      this.batch((currentSheet) => {
+        for (const record of records) {
+          const result = currentSheet.updateRecordBy(keyField, record, headerRow);
+          if (result.updated) {
+            updated += 1;
+          }
+        }
+      });
+
+      return {
+        headers: trimTrailingEmptyHeaderNames(this.getHeaders(headerRow)),
+        imported: records.length,
+        inserted: 0,
+        mode,
+        rowCount: this.getRecords(headerRow).length,
+        updated,
+      };
     }
 
     let inserted = 0;
@@ -1153,7 +1178,9 @@ export class Sheet {
   }
 
   /**
-   * Synchronizes records with replace or upsert semantics.
+   * Synchronizes records with replace, update, or upsert semantics.
+   *
+   * When `keyField` is provided and `mode` is omitted, this defaults to `upsert`.
    */
   syncRecords(records: Array<Record<string, CellValue>>, options: SheetImportRecordsOptions = {}): SheetImportRecordsResult {
     return this.importRecords(records, {
@@ -2586,6 +2613,8 @@ export class Sheet {
   /**
    * Writes one header-mapped record into an existing row.
    *
+   * Missing keys are preserved instead of cleared.
+   *
    * `rowNumber` and `headerRowNumber` are 1-based.
    */
   setRecord(rowNumber: number, record: Record<string, CellValue>, headerRowNumber = 1): void {
@@ -2597,6 +2626,24 @@ export class Sheet {
 
     const headerMap = this.resolveRecordHeaderMap(headerRowNumber, [record], rowNumber > headerRowNumber);
     this.writeRecordRow(rowNumber, record, headerMap, false);
+  }
+
+  /**
+   * Replaces one header-mapped record inside an existing row.
+   *
+   * Missing keys are cleared instead of preserved.
+   *
+   * `rowNumber` and `headerRowNumber` are 1-based.
+   */
+  replaceRecord(rowNumber: number, record: Record<string, CellValue>, headerRowNumber = 1): void {
+    assertRowNumber(rowNumber);
+
+    if (Object.keys(record).length === 0) {
+      return;
+    }
+
+    const headerMap = this.resolveRecordHeaderMap(headerRowNumber, [record], rowNumber > headerRowNumber);
+    this.writeRecordRow(rowNumber, record, headerMap, true);
   }
 
   /**
@@ -2629,7 +2676,63 @@ export class Sheet {
   }
 
   /**
+   * Updates one matched record with partial field semantics.
+   *
+   * Missing keys are preserved instead of cleared.
+   */
+  updateRecordBy(field: string, record: Record<string, CellValue>, headerRowNumber?: number): SheetUpdateRecordResult;
+  updateRecordBy(
+    field: string,
+    value: CellValue,
+    record: Record<string, CellValue>,
+    headerRowNumber?: number,
+  ): SheetUpdateRecordResult;
+  updateRecordBy(
+    field: string,
+    valueOrRecord: CellValue | Record<string, CellValue>,
+    recordOrHeaderRowNumber: Record<string, CellValue> | number = 1,
+    headerRowNumber = 1,
+  ): SheetUpdateRecordResult {
+    const useImplicitMatchValue =
+      typeof valueOrRecord === "object" &&
+      valueOrRecord !== null &&
+      !Array.isArray(valueOrRecord) &&
+      recordOrHeaderRowNumber !== null &&
+      typeof recordOrHeaderRowNumber === "number";
+    const record = useImplicitMatchValue
+      ? (valueOrRecord as Record<string, CellValue>)
+      : (recordOrHeaderRowNumber as Record<string, CellValue>);
+    const resolvedHeaderRowNumber = useImplicitMatchValue ? (recordOrHeaderRowNumber as number) : headerRowNumber;
+
+    const matchValue = useImplicitMatchValue
+      ? Object.hasOwn(record, field)
+        ? record[field] ?? null
+        : (() => {
+            throw new XlsxError(`Record is missing match field: ${field}`);
+          })()
+      : (valueOrRecord as CellValue);
+    const rowNumber = this.findRecordRow(field, matchValue, resolvedHeaderRowNumber);
+
+    if (rowNumber === null) {
+      return {
+        record: { ...record },
+        row: null,
+        updated: false,
+      };
+    }
+
+    this.setRecord(rowNumber, record, resolvedHeaderRowNumber);
+    return {
+      record: { ...record },
+      row: rowNumber,
+      updated: true,
+    };
+  }
+
+  /**
    * Creates or updates a record matched by one header field.
+   *
+   * Missing keys are cleared when an existing row is matched.
    *
    * Returns the 1-based row number that was written.
    */
@@ -2652,7 +2755,7 @@ export class Sheet {
       };
     }
 
-    this.setRecord(rowNumber, record, headerRowNumber);
+    this.replaceRecord(rowNumber, record, headerRowNumber);
     return {
       inserted: false,
       record: { ...record },

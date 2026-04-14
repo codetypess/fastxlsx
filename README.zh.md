@@ -155,6 +155,9 @@ workbook.batch((currentWorkbook) => {
 
 对于空白 sheet，`addRecord()`、`addRecords()`、`setRecord()`、`setRecords()` 会自动根据 record key 初始化表头行。
 
+对于已经命中的现有行，`setRecord()` 和 `updateRecordBy()` 会保留未提供的字段。
+`replaceRecord()`、`upsertRecord()` 以及默认 keyed 模式下的 `syncRecords()` 会整体替换命中的行，并把未提供的字段清空。
+
 创建一个带布局、注释和打印设置的导出模板：
 
 ```ts
@@ -180,10 +183,12 @@ const workbook = Workbook.create({
 });
 ```
 
-按 key 同步记录，而不是整张表替换：
+如果只是改部分字段，用 patch 式更新；只有在命中行 payload 完整时，才使用 keyed sync：
 
 ```ts
 const sheet = workbook.getSheet("Data");
+
+sheet.updateRecordBy("id", 1002, { score: 91 });
 
 sheet.syncRecords(
   [
@@ -193,6 +198,9 @@ sheet.syncRecords(
   { keyField: "id" },
 );
 ```
+
+当提供 `keyField` 且未显式指定 `mode` 时，`syncRecords()` 默认走 `upsert`。
+如果要做部分更新，请使用 `importRecords(..., { mode: "update" })` 或 `updateRecordBy()`；只有在允许整行替换时才使用 `upsert`。
 
 使用更高层的 workbook helper 创建配置表和数据表：
 
@@ -221,7 +229,8 @@ npm run cli -- workbook defined-name set out.xlsx --name Scores --value 'Summary
 npm run cli -- sheet import input.xlsx --sheet Data --format json --from rows.json --output out.xlsx
 npm run cli -- sheet export out.xlsx --sheet Data --format csv --output rows.csv
 npm run cli -- sheet records append out.xlsx --sheet Data --records '[{"id":1003,"name":"Gamma"}]' --in-place
-npm run cli -- sheet records upsert out.xlsx --sheet Data --key-field id --record '{"id":1002,"name":"Beta"}' --in-place
+npm run cli -- sheet records update out.xlsx --sheet Data --key-field id --value 1002 --record '{"name":"Beta"}' --in-place
+npm run cli -- sheet records upsert out.xlsx --sheet Data --key-field id --record '{"id":1004,"name":"Delta"}' --in-place
 npm run cli -- sheet hyperlink set out.xlsx --sheet Data --cell A2 --target https://example.com --text "Open" --in-place
 npm run cli -- sheet filter set out.xlsx --sheet Data --range A1:C20 --in-place
 npm run cli -- sheet selection set out.xlsx --sheet Data --active-cell C3 --range C3:D4 --in-place
@@ -230,6 +239,9 @@ npm run cli -- sheet merge add out.xlsx --sheet Data --range A1:B2 --in-place
 npm run cli -- sheet protection set out.xlsx --sheet Data --sort --auto-filter --in-place
 npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final score" --in-place
 ```
+
+只想改传入字段时请使用 `update`。
+只有在“缺失行需要插入、命中行允许整行替换”时才使用 `upsert`。
 
 ## 设计思路
 
@@ -437,10 +449,16 @@ npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final s
 - `sheet.insertColumn(column, count?)`
 - `sheet.setHeaders(headers, headerRowNumber?, startColumn?)`
 - `sheet.setRecord(rowNumber, record, headerRowNumber?)`
+- `sheet.replaceRecord(rowNumber, record, headerRowNumber?)`
 - `sheet.setRecords(records, headerRowNumber?)`
 - `sheet.fromJson(records, headerRowNumber?)`
 - `sheet.fromCsv(csv, headerRowNumber?)`
+- `sheet.importRecords(records, options?)`
+- `sheet.exportRecords(options?)`
+- `sheet.updateRecordBy(field, record, headerRowNumber?)`
+- `sheet.updateRecordBy(field, value, record, headerRowNumber?)`
 - `sheet.upsertRecord(field, record, headerRowNumber?)`
+- `sheet.syncRecords(records, options?)`
 - `sheet.deleteRecord(rowNumber, headerRowNumber?)`
 - `sheet.deleteRecords(rowNumbers, headerRowNumber?)`
 - `sheet.deleteRecordBy(field, value, headerRowNumber?)`
