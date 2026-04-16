@@ -45,6 +45,16 @@ npm run cli -- inspect path/to/file.xlsx
 npm run cli -- move-sheet path/to/file.xlsx --sheet Archive --index 0 --in-place
 ```
 
+## Command Router
+
+- Need to inspect a workbook or you do not know the structure yet: `npx fastxlsx inspect path/to/file.xlsx`
+- Need to read or write a single cell: `npx fastxlsx get ...` / `npx fastxlsx set ...`
+- Need to read a normal worksheet from a non-profile workbook: `npx fastxlsx sheet records list ...` or `npx fastxlsx sheet export ...`
+- Need to update a normal header-mapped worksheet: `npx fastxlsx sheet records ...` or `npx fastxlsx sheet import ...`
+- Need to work with a key/value config sheet: `npx fastxlsx config-table ...`
+- Need to work with a structured table and a profile already exists, or the header row and data start row are known: `npx fastxlsx table ...`
+- When in doubt, do not start with `table` for an arbitrary sheet read. Inspect first, then prefer `sheet` commands unless the workbook is clearly using a structured table workflow.
+
 ## Library Usage
 
 Install the package and import it directly in your project:

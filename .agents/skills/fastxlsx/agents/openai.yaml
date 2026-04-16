@@ -1,4 +1,4 @@
 interface:
   display_name: "FastXLSX Agent"
-  short_description: "Inspect, sync, and patch XLSX via CLI"
-  default_prompt: "Use $fastxlsx to inspect, sync, or patch an XLSX workbook with the available fastxlsx CLI entry."
+  short_description: "Read and patch XLSX with the right CLI workflow"
+  default_prompt: "Use $fastxlsx to inspect, read, sync, or patch an XLSX workbook with the available fastxlsx CLI entry. For ordinary sheet reads use `sheet records` or `sheet export`. Use `config-table` for header-based config sheets. Use `table` only when a profile exists or header/data-start/key boundaries are explicit."
