@@ -42,6 +42,7 @@ export type {
   DefinedName,
   FreezePane,
   Hyperlink,
+  RecalculateSummary,
   SetDataValidationOptions,
   SetDefinedNameOptions,
   SetFormulaOptions,

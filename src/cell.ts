@@ -151,6 +151,13 @@ export class Cell {
   }
 
   /**
+   * Manually recalculates this formula cell.
+   */
+  recalculate(): CellSnapshot {
+    return this.sheet.recalculateCell(this.address);
+  }
+
+  /**
    * Writes a formula to this cell.
    */
   setFormula(formula: string, options: SetFormulaOptions = {}): void {

@@ -410,6 +410,12 @@ export interface SetFormulaOptions {
   cachedValue?: CellValue;
 }
 
+export interface RecalculateSummary {
+  cells: number;
+  sheets: number;
+  updated: number;
+}
+
 export interface SetDefinedNameOptions {
   scope?: string;
 }

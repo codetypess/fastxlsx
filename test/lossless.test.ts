@@ -907,6 +907,101 @@ test("formula cells with self-closing string cached values read as empty strings
   assert.equal(sheet.getCell("A1"), "");
 });
 
+test("formula caches stay stale until cell.recalculate is called manually", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", 1);
+  sheet.setCell("B1", 2);
+  sheet.setFormula("C1", "SUM(A1:B1)", { cachedValue: 3 });
+
+  sheet.setCell("A1", 10);
+
+  assert.equal(sheet.getCell("C1"), 3);
+  assert.equal(sheet.cell("C1").value, 3);
+
+  const snapshot = sheet.cell("C1").recalculate();
+
+  assert.equal(snapshot.value, 12);
+  assert.equal(sheet.getCell("C1"), 12);
+  assert.match(entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml"), /<c r="C1"><f>SUM\(A1:B1\)<\/f><v>12<\/v><\/c>/);
+});
+
+test("sheet and workbook recalculate APIs stay manual and resolve cross-sheet names", () => {
+  const workbook = Workbook.create({
+    sheets: [{ name: "Data" }, { name: "Summary" }],
+  });
+  let data = workbook.getSheet("Data");
+  let summary = workbook.getSheet("Summary");
+
+  data.setCell("A1", 4);
+  data.setCell("A2", 6);
+  workbook.setDefinedName("Total", "SUM(Data!A1:A2)");
+  data = workbook.getSheet("Data");
+  summary = workbook.getSheet("Summary");
+  summary.setFormula("B1", "Total", { cachedValue: 0 });
+  summary.setFormula("B2", "Data!A1+1", { cachedValue: 0 });
+
+  assert.equal(summary.getCell("B1"), 0);
+  assert.equal(summary.getCell("B2"), 0);
+
+  const sheetSummary = summary.recalculate();
+
+  assert.deepEqual(sheetSummary, { cells: 2, sheets: 1, updated: 2 });
+  assert.equal(summary.getCell("B1"), 10);
+  assert.equal(summary.getCell("B2"), 5);
+
+  data.setCell("A1", 10);
+
+  assert.equal(summary.getCell("B1"), 10);
+  assert.equal(summary.getCell("B2"), 5);
+
+  const workbookSummary = workbook.recalculate();
+
+  assert.deepEqual(workbookSummary, { cells: 2, sheets: 2, updated: 2 });
+  assert.equal(summary.getCell("B1"), 16);
+  assert.equal(summary.getCell("B2"), 11);
+});
+
+test("manual recalc writes cached formula errors with structured metadata", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", 0);
+  sheet.setFormula("B1", "1/A1", { cachedValue: 1 });
+
+  const snapshot = sheet.recalculateCell("B1");
+
+  assert.equal(snapshot.value, "#DIV/0!");
+  assert.deepEqual(snapshot.error, { code: 0x07, text: "#DIV/0!" });
+  assert.equal(sheet.getCell("B1"), "#DIV/0!");
+
+  const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
+  assert.match(sheetXml, /<c r="B1" t="e"><f>1\/A1<\/f><v>#DIV\/0!<\/v><\/c>/);
+});
+
+test("manual recalc rejects shared formula cells for now", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1"><f t="shared" si="0">SUM(B1:C1)</f><v>0</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+
+  assert.throws(
+    () => workbook.getSheet("Sheet1").cell("A1").recalculate(),
+    /Unsupported formula shape at Sheet1!A1/,
+  );
+});
+
 test("inline string cells decode numeric entities and ignore phonetic runs", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

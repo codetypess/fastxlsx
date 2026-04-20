@@ -22,12 +22,14 @@ import type {
   CellValue,
   CreateTableSheetOptions,
   DefinedName,
+  RecalculateSummary,
   SetDefinedNameOptions,
   SheetVisibility,
   WorkbookCreateOptions,
   WorkbookCreateSheetOptions,
 } from "./types.js";
 import { XlsxError } from "./errors.js";
+import { recalculateWorkbookFormulas } from "./formula/formula-recalc.js";
 import {
   Sheet,
 } from "./sheet.js";
@@ -428,6 +430,13 @@ export class Workbook {
         this.batchedSheets.clear();
       }
     }
+  }
+
+  /**
+   * Manually recalculates all supported formula cells in the workbook.
+   */
+  recalculate(): RecalculateSummary {
+    return recalculateWorkbookFormulas(this);
   }
 
   /**

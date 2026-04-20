@@ -1,5 +1,6 @@
 import { Cell } from "./cell.js";
 import type {
+  CellError,
   CellStyleAlignment,
   CellStyleAlignmentPatch,
   CellBorderDefinition,
@@ -14,6 +15,7 @@ import type {
   CellStyleDefinition,
   CellStylePatch,
   CellValue,
+  RecalculateSummary,
   SheetExportRecordsOptions,
   SheetImportRecordsOptions,
   DataValidation,
@@ -33,6 +35,10 @@ import type {
   SheetUpsertRecordResult,
 } from "./types.js";
 import { XlsxError } from "./errors.js";
+import {
+  recalculateCellFormula,
+  recalculateSheetFormulas,
+} from "./formula/formula-recalc.js";
 import {
   buildSheetIndex,
   getLocatedCell,
@@ -164,6 +170,7 @@ import {
   transformRowXml,
   transformWorksheetStructureReferences,
 } from "./sheet/sheet-structure.js";
+import { buildRecalculatedFormulaCellXml } from "./sheet/sheet-formula-xml.js";
 import { formatSheetNameForReference } from "./workbook/workbook-sheet-package.js";
 import {
   buildFormulaCellXml,
@@ -736,6 +743,25 @@ export class Sheet {
     }
 
     return this.readCellSnapshot(resolveCellAddress(addressOrRowNumber, column)).formula;
+  }
+
+  /**
+   * Manually recalculates formula cells on this worksheet.
+   */
+  recalculate(): RecalculateSummary {
+    return recalculateSheetFormulas(this.workbook, this);
+  }
+
+  /**
+   * Manually recalculates one formula cell.
+   *
+   * Numeric row and column arguments are 1-based.
+   */
+  recalculateCell(address: string): CellSnapshot;
+  recalculateCell(rowNumber: number, column: number | string): CellSnapshot;
+  recalculateCell(addressOrRowNumber: string | number, column?: number | string): CellSnapshot {
+    const normalizedAddress = resolveCellAddress(addressOrRowNumber, column);
+    return recalculateCellFormula(this.workbook, this, normalizedAddress);
   }
 
   /**
@@ -2348,6 +2374,36 @@ export class Sheet {
   }
 
   /**
+   * Internal helper used by manual formula recalculation to rewrite only the cached value.
+   */
+  applyRecalculatedFormulaValue(address: string, value: CellValue, error: CellError | null): void {
+    const normalizedAddress = normalizeCellAddress(address);
+    const currentCell = this.getCurrentCellWriteState(normalizedAddress);
+    if (!currentCell.cellXml || currentCell.snapshot.formula === null) {
+      throw new XlsxError(`Cell is not a formula cell: ${normalizedAddress}`);
+    }
+
+    const nextCellXml = buildRecalculatedFormulaCellXml(
+      normalizedAddress,
+      currentCell.cellXml,
+      value,
+      error?.text ?? null,
+    );
+
+    if (this.workbook.isBatching()) {
+      this.stagePendingCellMutation(normalizedAddress, {
+        attributesSource: extractCellAttributesSource(nextCellXml),
+        kind: "set",
+        snapshot: buildFormulaCellSnapshot(currentCell.snapshot.formula, value, currentCell.snapshot.styleId, error),
+        xml: nextCellXml,
+      });
+      return;
+    }
+
+    this.writeCellXml(normalizedAddress, nextCellXml);
+  }
+
+  /**
    * Returns the current internal revision counter for cache invalidation.
    */
   getRevision(): number {
@@ -3534,20 +3590,23 @@ function buildFormulaCellSnapshot(
   formula: string,
   cachedValue: CellValue,
   styleId: number | null,
+  error: CellError | null = null,
 ): CellSnapshot {
   return {
     exists: true,
-    error: null,
+    error,
     formula,
     rawType:
-      typeof cachedValue === "string"
-        ? "str"
-        : typeof cachedValue === "boolean"
-          ? "b"
-          : null,
+      error !== null
+        ? "e"
+        : typeof cachedValue === "string"
+          ? "str"
+          : typeof cachedValue === "boolean"
+            ? "b"
+            : null,
     styleId,
     type: "formula",
-    value: cachedValue,
+    value: error?.text ?? cachedValue,
   };
 }
 
