@@ -57,6 +57,42 @@ test("inspect reports workbook structure as JSON", async () => {
   }
 });
 
+test("get returns translated shared formulas for shared-formula followers", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const fixtureDir = resolve("test/fixtures/lossless-source");
+    const entries = replaceEntryText(
+      await loadFixtureEntries(fixtureDir),
+      "xl/worksheets/sheet1.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1"><f t="shared" ref="A1:B2" si="0">B1+$C$1+D$1+$E2+SUM(F1:G2)</f><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="B2" s="1"><f t="shared" si="0"/><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+    );
+    const workbook = Workbook.fromEntries(entries);
+    const inputPath = join(tempRoot, "shared-formula.xlsx");
+    await workbook.save(inputPath);
+
+    const result = await runCliCapture(["get", inputPath, "--sheet", "Sheet1", "--cell", "B2"]);
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.formula, "C2+$C$1+E$1+$E3+SUM(G2:H3)");
+    assert.equal(payload.type, "formula");
+    assert.equal(payload.value, 2);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("create builds a new workbook through the direct CLI command", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
 
@@ -3193,4 +3229,20 @@ async function loadFixtureEntries(rootDirectory: string): Promise<Array<{ path: 
 
   entries.sort((left, right) => left.path.localeCompare(right.path));
   return entries;
+}
+
+function replaceEntryText(
+  entries: Array<{ path: string; data: Uint8Array }>,
+  path: string,
+  text: string,
+): Array<{ path: string; data: Uint8Array }> {
+  const nextEntries = entries.map((entry) =>
+    entry.path === path
+      ? { path, data: new TextEncoder().encode(text) }
+      : entry,
+  );
+
+  return nextEntries.some((entry) => entry.path === path)
+    ? nextEntries
+    : [...nextEntries, { path, data: new TextEncoder().encode(text) }];
 }

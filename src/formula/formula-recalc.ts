@@ -14,7 +14,6 @@ import {
   splitCellAddress,
 } from "../sheet/sheet-address.js";
 import { buildSheetIndex } from "../sheet/sheet-index.js";
-import { parseFormulaTagInfo } from "../sheet/sheet-formula-xml.js";
 import { normalizeSheetNameKey } from "../workbook/workbook-sheet-helpers.js";
 
 const FORMULA_ERROR_CODES: Record<string, number> = {
@@ -634,22 +633,21 @@ class FormulaRuntime {
         continue;
       }
 
-      for (const cell of row.cells) {
-        if (cell.snapshot.formula === null) {
-          continue;
-        }
+        for (const cell of row.cells) {
+          if (cell.snapshot.formula === null) {
+            continue;
+          }
 
-        const cellXml = sheetXml.slice(cell.start, cell.end);
-        const formulaInfo = parseFormulaTagInfo(cellXml);
-        definitions.set(cell.address, {
-          address: cell.address,
-          cellXml,
-          formula: formulaInfo.formula ?? cell.snapshot.formula,
-          formulaAttributesSource: formulaInfo.attributesSource,
-          sheetName,
-        });
+          const cellXml = sheetXml.slice(cell.start, cell.end);
+          definitions.set(cell.address, {
+            address: cell.address,
+            cellXml,
+            formula: cell.snapshot.formula,
+            formulaAttributesSource: cell.formulaAttributesSource,
+            sheetName,
+          });
+        }
       }
-    }
 
     this.formulaCellCaches.set(sheetName, definitions);
     return definitions;

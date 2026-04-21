@@ -2,13 +2,15 @@ import { XlsxError } from "../errors.js";
 import { parseStringItemText } from "../workbook/shared-strings.js";
 import type { CellSnapshot, CellType, CellValue } from "../types.js";
 import type { Workbook } from "../workbook.js";
-import { decodeXmlText } from "../utils/xml.js";
+import { translateFormulaReferences } from "./sheet-structure.js";
+import { decodeXmlText, parseAttributes } from "../utils/xml.js";
 
 export interface LocatedCell {
   address: string;
   start: number;
   end: number;
   attributesSource: string;
+  formulaAttributesSource: string;
   innerStart: number;
   innerEnd: number;
   rawType: string | null;
@@ -80,11 +82,6 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
   const sheetDataInnerEnd = sheetDataCloseTagStart;
   const rows = new Map<number, LocatedRow>();
   const rowNumbers: number[] = [];
-  let minRow = Number.POSITIVE_INFINITY;
-  let maxRow = 0;
-  let minColumn = Number.POSITIVE_INFINITY;
-  let maxColumn = 0;
-  let hasUsedBounds = false;
   let previousRowNumber = 0;
   let rowsAreSorted = true;
   let cursor = sheetDataInnerStart;
@@ -166,15 +163,17 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
         const cellInnerEnd = cellSelfClosing ? cellEnd : cellEnd;
         const rawType = cellMetadata.rawType;
         const styleId = cellMetadata.styleIdText === undefined ? null : Number(cellMetadata.styleIdText);
+        const parsedCell = buildCellSnapshot(workbook, rawType, styleId, sheetXml, cellInnerStart, cellInnerEnd);
         const cell: LocatedCell = {
           address,
           start: cellStart,
           end: cellSelfClosing ? cellEnd : cellEnd + CELL_CLOSE_TAG.length,
           attributesSource: cellAttributesSource,
+          formulaAttributesSource: parsedCell.formulaAttributesSource,
           innerStart: cellInnerStart,
           innerEnd: cellInnerEnd,
           rawType,
-          snapshot: buildCellSnapshot(workbook, rawType, styleId, sheetXml, cellInnerStart, cellInnerEnd),
+          snapshot: parsedCell.snapshot,
           styleId,
           rowNumber,
           columnNumber,
@@ -195,18 +194,6 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
       }
     }
 
-    const rowAnalysis = analyzeRowCells(row.cells);
-    row.maxColumnNumber = rowAnalysis.maxColumnNumber;
-    if (row.maxColumnNumber > 0) {
-      minColumn = Math.min(minColumn, row.cells[0]?.columnNumber ?? row.maxColumnNumber);
-      maxColumn = Math.max(maxColumn, row.maxColumnNumber);
-    }
-    if (rowAnalysis.hasUsedCells) {
-      hasUsedBounds = true;
-      minRow = Math.min(minRow, rowNumber);
-      maxRow = Math.max(maxRow, rowNumber);
-    }
-
     rows.set(rowNumber, row);
     rowNumbers.push(rowNumber);
     if (rowNumber < previousRowNumber) {
@@ -221,12 +208,14 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
     rowNumbers.sort((left, right) => left - right);
   }
 
+  resolveSharedFormulaSnapshots(rows, rowNumbers);
+
   return {
     xml: sheetXml,
     cells: null,
     rows,
     rowNumbers,
-    usedBounds: hasUsedBounds ? { minRow, maxRow, minColumn, maxColumn } : null,
+    usedBounds: calculateUsedBounds(rows, rowNumbers),
     sheetDataInnerStart,
     sheetDataInnerEnd,
   };
@@ -292,6 +281,35 @@ function analyzeRowCells(cells: LocatedCell[]): { hasUsedCells: boolean; maxColu
   }
 
   return { hasUsedCells: true, maxColumnNumber: logicalMaxColumnNumber };
+}
+
+function calculateUsedBounds(rows: Map<number, LocatedRow>, rowNumbers: number[]): UsedRangeBounds | null {
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = 0;
+  let minColumn = Number.POSITIVE_INFINITY;
+  let maxColumn = 0;
+  let hasUsedBounds = false;
+
+  for (const rowNumber of rowNumbers) {
+    const row = rows.get(rowNumber);
+    if (!row) {
+      continue;
+    }
+
+    const rowAnalysis = analyzeRowCells(row.cells);
+    row.maxColumnNumber = rowAnalysis.maxColumnNumber;
+    if (row.maxColumnNumber > 0) {
+      minColumn = Math.min(minColumn, row.cells[0]?.columnNumber ?? row.maxColumnNumber);
+      maxColumn = Math.max(maxColumn, row.maxColumnNumber);
+    }
+    if (rowAnalysis.hasUsedCells) {
+      hasUsedBounds = true;
+      minRow = Math.min(minRow, rowNumber);
+      maxRow = Math.max(maxRow, rowNumber);
+    }
+  }
+
+  return hasUsedBounds ? { minRow, maxRow, minColumn, maxColumn } : null;
 }
 
 function isUsedCell(snapshot: CellSnapshot | undefined): boolean {
@@ -395,8 +413,12 @@ function buildCellSnapshot(
   xml: string,
   innerStart: number,
   innerEnd: number,
-): CellSnapshot {
-  const { formulaSource, hasSelfClosingValue, valueSource } = extractCellContentsFast(xml, innerStart, innerEnd);
+): { formulaAttributesSource: string; snapshot: CellSnapshot } {
+  const { formulaAttributesSource, formulaSource, hasSelfClosingValue, valueSource } = extractCellContentsFast(
+    xml,
+    innerStart,
+    innerEnd,
+  );
   const inlineText = rawType === "inlineStr" ? parseStringItemText(xml.slice(innerStart, innerEnd)) : null;
   const formula = formulaSource === null ? null : decodeXmlText(formulaSource);
   const value = parseCellValue(workbook, rawType, valueSource, inlineText, hasSelfClosingValue);
@@ -404,13 +426,16 @@ function buildCellSnapshot(
 
   if (formula !== null) {
     return {
-      exists: true,
-      error,
-      formula,
-      rawType,
-      styleId,
-      type: "formula",
-      value,
+      formulaAttributesSource,
+      snapshot: {
+        exists: true,
+        error,
+        formula,
+        rawType,
+        styleId,
+        type: "formula",
+        value,
+      },
     };
   }
 
@@ -426,13 +451,16 @@ function buildCellSnapshot(
           : "boolean";
 
   return {
-    exists: true,
-    error,
-    formula: null,
-    rawType,
-    styleId,
-    type,
-    value,
+    formulaAttributesSource,
+    snapshot: {
+      exists: true,
+      error,
+      formula: null,
+      rawType,
+      styleId,
+      type,
+      value,
+    },
   };
 }
 
@@ -629,10 +657,12 @@ function readXmlAttrFast(source: string, attributeName: string): string | undefi
 }
 
 function extractCellContentsFast(xml: string, start: number, end: number): {
+  formulaAttributesSource: string;
   formulaSource: string | null;
   hasSelfClosingValue: boolean;
   valueSource: string | undefined;
 } {
+  let formulaAttributesSource = "";
   let formulaSource: string | null = null;
   let valueSource: string | undefined;
   let hasSelfClosingValue = false;
@@ -674,6 +704,9 @@ function extractCellContentsFast(xml: string, start: number, end: number): {
     const tagName = xml.slice(nameStart, nameEnd);
     if (tagName === "f" || tagName === "v") {
       const selfClosing = isSelfClosingTagSource(xml.slice(nameEnd, tagOpenEnd));
+      if (tagName === "f") {
+        formulaAttributesSource = cleanTagAttributesSource(xml.slice(nameEnd, tagOpenEnd));
+      }
       if (tagName === "v" && selfClosing) {
         hasSelfClosingValue = true;
       } else if (!selfClosing) {
@@ -695,7 +728,65 @@ function extractCellContentsFast(xml: string, start: number, end: number): {
     cursor = tagOpenEnd + 1;
   }
 
-  return { formulaSource, hasSelfClosingValue, valueSource };
+  return { formulaAttributesSource, formulaSource, hasSelfClosingValue, valueSource };
+}
+
+function resolveSharedFormulaSnapshots(rows: Map<number, LocatedRow>, rowNumbers: number[]): void {
+  const sharedAnchors = new Map<string, { columnNumber: number; formula: string; rowNumber: number }>();
+  const sharedFollowers: Array<{ cell: LocatedCell; sharedIndex: string }> = [];
+
+  for (const rowNumber of rowNumbers) {
+    const row = rows.get(rowNumber);
+    if (!row) {
+      continue;
+    }
+
+    for (const cell of row.cells) {
+      if (cell.formulaAttributesSource.length === 0) {
+        continue;
+      }
+
+      const attributes = new Map(parseAttributes(cell.formulaAttributesSource));
+      if (attributes.get("t") !== "shared") {
+        continue;
+      }
+
+      const sharedIndex = attributes.get("si");
+      if (!sharedIndex) {
+        continue;
+      }
+
+      if (attributes.has("ref") || (cell.snapshot.formula !== null && cell.snapshot.formula.length > 0)) {
+        if (cell.snapshot.formula !== null && cell.snapshot.formula.length > 0) {
+          sharedAnchors.set(sharedIndex, {
+            columnNumber: cell.columnNumber,
+            formula: cell.snapshot.formula,
+            rowNumber: cell.rowNumber,
+          });
+        }
+        continue;
+      }
+
+      sharedFollowers.push({ cell, sharedIndex });
+    }
+  }
+
+  for (const { cell, sharedIndex } of sharedFollowers) {
+    const anchor = sharedAnchors.get(sharedIndex);
+    if (!anchor) {
+      continue;
+    }
+
+    cell.snapshot = {
+      ...cell.snapshot,
+      formula: translateFormulaReferences(
+        anchor.formula,
+        cell.columnNumber - anchor.columnNumber,
+        cell.rowNumber - anchor.rowNumber,
+      ),
+      type: "formula",
+    };
+  }
 }
 
 function columnLabelToNumberFromAddress(address: string): number {

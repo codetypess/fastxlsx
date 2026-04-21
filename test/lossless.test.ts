@@ -919,6 +919,32 @@ test("formula cells can be read and updated without dropping styles", async () =
   assert.match(sheetXml, /<v>Hello<\/v>/);
 });
 
+test("shared formula follower cells resolve translated formulas", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1"><f t="shared" ref="A1:B2" si="0">B1+$C$1+D$1+$E2+SUM(F1:G2)</f><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="B2" s="1"><f t="shared" si="0"/><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const workbook = Workbook.fromEntries(entries);
+  const sheet = workbook.getSheet("Sheet1");
+
+  assert.equal(sheet.getFormula("A1"), "B1+$C$1+D$1+$E2+SUM(F1:G2)");
+  assert.equal(sheet.getFormula("B2"), "C2+$C$1+E$1+$E3+SUM(G2:H3)");
+  assert.equal(sheet.cell("B2").type, "formula");
+  assert.equal(sheet.getCell("B2"), 2);
+});
+
 test("formula cells with self-closing string cached values read as empty strings", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

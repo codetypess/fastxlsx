@@ -329,6 +329,122 @@ export function shiftFormulaReferences(
   return nextFormula;
 }
 
+export function translateFormulaReferences(
+  formula: string,
+  columnDelta: number,
+  rowDelta: number,
+): string {
+  if (columnDelta === 0 && rowDelta === 0) {
+    return formula;
+  }
+
+  let nextFormula = "";
+  let cursor = 0;
+  let inString = false;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+
+    if (character === "\"") {
+      nextFormula += character;
+
+      if (inString && formula[cursor + 1] === "\"") {
+        nextFormula += "\"";
+        cursor += 2;
+        continue;
+      }
+
+      inString = !inString;
+      cursor += 1;
+      continue;
+    }
+
+    if (inString) {
+      nextFormula += character;
+      cursor += 1;
+      continue;
+    }
+
+    if (character === "'") {
+      const quotedSheetRef = consumeQuotedSheetReference(formula, cursor);
+      if (quotedSheetRef) {
+        nextFormula += quotedSheetRef;
+        cursor += quotedSheetRef.length;
+        continue;
+      }
+    }
+
+    const remaining = formula.slice(cursor);
+    const previous = formula[cursor - 1];
+    const rangeMatch = remaining.match(
+      /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+):((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/,
+    );
+
+    if (rangeMatch && matchesTranslatedFormulaReference(previous)) {
+      const [
+        fullMatch,
+        startSheetRef,
+        startColumnDollar,
+        startColumnLabel,
+        startRowDollar,
+        startRowText,
+        endSheetRef,
+        endColumnDollar,
+        endColumnLabel,
+        endRowDollar,
+        endRowText,
+      ] = rangeMatch;
+
+      const leftRef = translateFormulaReference(
+        startSheetRef,
+        startColumnDollar,
+        startColumnLabel,
+        startRowDollar,
+        startRowText,
+        columnDelta,
+        rowDelta,
+      );
+      const rightRef = translateFormulaReference(
+        endSheetRef,
+        endColumnDollar,
+        endColumnLabel,
+        endRowDollar,
+        endRowText,
+        columnDelta,
+        rowDelta,
+      );
+
+      nextFormula += leftRef === null || rightRef === null ? "#REF!" : `${leftRef}:${rightRef}`;
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    const match = remaining.match(/^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Z]+)(\$?)(\d+)/);
+
+    if (match && matchesTranslatedFormulaReference(previous)) {
+      const [fullMatch, sheetRef, columnDollar, columnLabel, rowDollar, rowText] = match;
+      const translated = translateFormulaReference(
+        sheetRef,
+        columnDollar,
+        columnLabel,
+        rowDollar,
+        rowText,
+        columnDelta,
+        rowDelta,
+      );
+
+      nextFormula += translated ?? "#REF!";
+      cursor += fullMatch.length;
+      continue;
+    }
+
+    nextFormula += character;
+    cursor += 1;
+  }
+
+  return nextFormula;
+}
+
 export function deleteFormulaReferences(
   formula: string,
   currentSheetName: string,
@@ -1081,6 +1197,10 @@ function matchesFormulaReference(
   return matchesSheetReference(sheetRef, targetSheetName);
 }
 
+function matchesTranslatedFormulaReference(previousCharacter: string | undefined): boolean {
+  return !(previousCharacter && /[A-Za-z0-9_.]/.test(previousCharacter));
+}
+
 function matchesSheetReference(sheetRef: string | undefined, targetSheetName: string): boolean {
   if (!sheetRef) {
     return false;
@@ -1113,6 +1233,52 @@ function formatSheetReference(sheetName: string): string {
   }
 
   return `'${sheetName.replaceAll("'", "''")}'`;
+}
+
+function consumeQuotedSheetReference(formula: string, start: number): string | null {
+  let cursor = start + 1;
+
+  while (cursor < formula.length) {
+    const character = formula[cursor];
+    if (character !== "'") {
+      cursor += 1;
+      continue;
+    }
+
+    if (formula[cursor + 1] === "'") {
+      cursor += 2;
+      continue;
+    }
+
+    return formula[cursor + 1] === "!" ? formula.slice(start, cursor + 2) : null;
+  }
+
+  return null;
+}
+
+function translateFormulaReference(
+  sheetRef: string | undefined,
+  columnDollar: string,
+  columnLabel: string,
+  rowDollar: string,
+  rowText: string,
+  columnDelta: number,
+  rowDelta: number,
+): string | null {
+  const nextColumnNumber =
+    columnDollar === "$"
+      ? columnLabelToNumber(columnLabel)
+      : columnLabelToNumber(columnLabel) + columnDelta;
+  const nextRowNumber =
+    rowDollar === "$"
+      ? Number(rowText)
+      : Number(rowText) + rowDelta;
+
+  if (nextColumnNumber < 1 || nextRowNumber < 1) {
+    return null;
+  }
+
+  return `${sheetRef ?? ""}${columnDollar}${numberToColumnLabel(nextColumnNumber)}${rowDollar}${String(nextRowNumber)}`;
 }
 
 function normalizeSheetNameKey(sheetName: string): string {
