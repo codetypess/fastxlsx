@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { parseJsonCellValue, writeJson } from "./cli-json.js";
 import type { CellError, CellValue, DefinedName, SheetVisibility } from "../types.js";
+import { inferProfileName, inferTableProfile } from "./cli-table.js";
 import { parseNonNegativeInteger, parsePositiveInteger, resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
 import { Workbook } from "../workbook.js";
@@ -16,6 +17,19 @@ interface InspectResult {
     name: string;
     physicalRangeRef: string | null;
     rangeRef: string | null;
+    recommendedRead: {
+      commands: {
+        generateProfiles?: string;
+        inspect?: string;
+        list: string;
+      };
+      dataStartRow?: number;
+      headerRow: number;
+      keyFields: string[];
+      mode: "config-table" | "sheet" | "table";
+      profileName?: string;
+      reason: string;
+    };
     rowCount: number;
     visibility: SheetVisibility;
   }>;
@@ -626,6 +640,7 @@ async function inspectWorkbook(filePath: string, headerRow: number): Promise<Ins
     name: sheet.name,
     physicalRangeRef: sheet.getPhysicalRangeRef(),
     rangeRef: sheet.getRangeRef(),
+    recommendedRead: recommendReadCommand(filePath, sheet.name, sheet, headerRow),
     rowCount: sheet.rowCount,
     visibility: workbook.getSheetVisibility(sheet.name),
   }));
@@ -636,6 +651,165 @@ async function inspectWorkbook(filePath: string, headerRow: number): Promise<Ins
     file: filePath,
     sheets,
   };
+}
+
+function recommendReadCommand(
+  filePath: string,
+  sheetName: string,
+  sheet: ReturnType<Workbook["getSheet"]>,
+  previewHeaderRow: number,
+): InspectResult["sheets"][number]["recommendedRead"] {
+  try {
+    const profile = inferTableProfile(sheet);
+    const headers = trimTrailingEmptyStrings(sheet.getHeaders(profile.headerRow));
+    const keyFields = profile.keyFields ?? [];
+
+    if (shouldUseStructuredTable(sheet, profile)) {
+      return {
+        commands: {
+          generateProfiles: `fastxlsx table generate-profiles ${shellQuote(filePath)}`,
+          inspect: buildTableInspectCommand(filePath, sheetName, profile.headerRow, profile.dataStartRow),
+          list: buildTableListCommand(filePath, sheetName, profile.headerRow, profile.dataStartRow),
+        },
+        dataStartRow: profile.dataStartRow,
+        headerRow: profile.headerRow,
+        keyFields,
+        mode: "table",
+        profileName: inferProfileName(filePath, sheetName),
+        reason: buildStructuredTableReason(sheet, profile),
+      };
+    }
+
+    if (looksLikeConfigTableHeaders(headers)) {
+      return {
+        commands: {
+          list: buildConfigTableListCommand(filePath, sheetName, profile.headerRow),
+        },
+        dataStartRow: profile.dataStartRow,
+        headerRow: profile.headerRow,
+        keyFields,
+        mode: "config-table",
+        reason: "row 1 looks like the business header row and the headers include key/value fields",
+      };
+    }
+
+    return {
+      commands: {
+        list: buildSheetListCommand(filePath, sheetName, profile.headerRow),
+      },
+      dataStartRow: profile.dataStartRow,
+      headerRow: profile.headerRow,
+      keyFields,
+      mode: "sheet",
+      reason: "row 1 looks like the business header row and data begins immediately below it",
+    };
+  } catch {
+    const headers = trimTrailingEmptyStrings(sheet.getHeaders(previewHeaderRow));
+
+    if (previewHeaderRow === 1 && looksLikeConfigTableHeaders(headers)) {
+      return {
+        commands: {
+          list: buildConfigTableListCommand(filePath, sheetName, previewHeaderRow),
+        },
+        dataStartRow: previewHeaderRow + 1,
+        headerRow: previewHeaderRow,
+        keyFields: [],
+        mode: "config-table",
+        reason: "the previewed header row includes key/value fields, so config-table is the best first read",
+      };
+    }
+
+    return {
+      commands: {
+        list: buildSheetListCommand(filePath, sheetName, previewHeaderRow),
+      },
+      dataStartRow: previewHeaderRow + 1,
+      headerRow: previewHeaderRow,
+      keyFields: [],
+      mode: "sheet",
+      reason: "no structured-table markers were inferred; start with a plain sheet read using the chosen header row",
+    };
+  }
+}
+
+function shouldUseStructuredTable(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  profile: { dataStartRow: number; headerRow: number; keyFields?: string[] },
+): boolean {
+  const firstRowHeaders = trimTrailingEmptyStrings(sheet.getHeaders(1)).map((value) => value.trim());
+
+  return (
+    firstRowHeaders[0]?.startsWith("@") === true ||
+    profile.headerRow !== 1 ||
+    profile.dataStartRow !== profile.headerRow + 1 ||
+    (profile.keyFields?.length ?? 0) > 1
+  );
+}
+
+function buildStructuredTableReason(
+  sheet: ReturnType<Workbook["getSheet"]>,
+  profile: { dataStartRow: number; headerRow: number; keyFields?: string[] },
+): string {
+  const firstRowHeaders = trimTrailingEmptyStrings(sheet.getHeaders(1)).map((value) => value.trim());
+
+  if (firstRowHeaders[0]?.startsWith("@")) {
+    return `row 1 starts with marker header ${JSON.stringify(firstRowHeaders[0])}; business headers were inferred at row ${profile.headerRow} and data starts at row ${profile.dataStartRow}`;
+  }
+
+  if (profile.headerRow !== 1) {
+    return `the business header row was inferred at row ${profile.headerRow} instead of row 1`;
+  }
+
+  if (profile.dataStartRow > profile.headerRow + 1) {
+    return `rows ${profile.headerRow + 1}-${profile.dataStartRow - 1} look like metadata or validator rows`;
+  }
+
+  if ((profile.keyFields?.length ?? 0) > 1) {
+    return `the sheet uses composite keys (${profile.keyFields!.join(", ")}) and should be read as a structured table`;
+  }
+
+  return "the sheet needs explicit table boundaries for reliable reads";
+}
+
+function looksLikeConfigTableHeaders(headers: string[]): boolean {
+  const normalizedHeaders = headers
+    .map((header) => header.trim().toLowerCase())
+    .filter((header) => header.length > 0);
+  return normalizedHeaders.includes("key") && normalizedHeaders.includes("value");
+}
+
+function buildSheetListCommand(filePath: string, sheetName: string, headerRow: number): string {
+  return `fastxlsx sheet records list ${shellQuote(filePath)} --sheet ${shellQuote(sheetName)} --header-row ${headerRow}`;
+}
+
+function buildConfigTableListCommand(filePath: string, sheetName: string, headerRow: number): string {
+  return `fastxlsx config-table list ${shellQuote(filePath)} --sheet ${shellQuote(sheetName)} --header-row ${headerRow}`;
+}
+
+function buildTableInspectCommand(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): string {
+  return `fastxlsx table inspect ${shellQuote(filePath)} --sheet ${shellQuote(sheetName)} --header-row ${headerRow} --data-start-row ${dataStartRow}`;
+}
+
+function buildTableListCommand(
+  filePath: string,
+  sheetName: string,
+  headerRow: number,
+  dataStartRow: number,
+): string {
+  return `fastxlsx table list ${shellQuote(filePath)} --sheet ${shellQuote(sheetName)} --header-row ${headerRow} --data-start-row ${dataStartRow}`;
+}
+
+function shellQuote(value: string): string {
+  if (value.length === 0) {
+    return "''";
+  }
+
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
 
 async function getCell(filePath: string, sheetName: string, cellAddress: string): Promise<GetCellResult> {

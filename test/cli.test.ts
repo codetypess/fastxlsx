@@ -50,17 +50,98 @@ test("inspect reports workbook structure as JSON", async () => {
     assert.equal(output.file, inputPath);
     assert.equal(output.activeSheet, "Sheet1");
     assert.deepEqual(output.definedNames, []);
-    assert.deepEqual(output.sheets, [
-      {
-        columnCount: 1,
-        headers: ["Hello"],
-        name: "Sheet1",
-        physicalRangeRef: "A1",
-        rangeRef: "A1",
-        rowCount: 1,
-        visibility: "visible",
+    assert.equal(output.sheets.length, 1);
+    assert.deepEqual(output.sheets[0], {
+      columnCount: 1,
+      headers: ["Hello"],
+      name: "Sheet1",
+      physicalRangeRef: "A1",
+      rangeRef: "A1",
+      recommendedRead: {
+        commands: {
+          list: `fastxlsx sheet records list '${inputPath}' --sheet 'Sheet1' --header-row 1`,
+        },
+        dataStartRow: 2,
+        headerRow: 1,
+        keyFields: [],
+        mode: "sheet",
+        reason: "no structured-table markers were inferred; start with a plain sheet read using the chosen header row",
       },
-    ]);
+      rowCount: 1,
+      visibility: "visible",
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("inspect recommends plain sheet, config-table, and structured table workflows", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "fastxlsx-cli-test-"));
+
+  try {
+    const inputPath = join(tempRoot, "router.xlsx");
+    const workbook = Workbook.create("Data");
+    workbook.getSheet("Data").setRecords([{ id: 1001, name: "Alpha" }]);
+
+    const configSheet = workbook.addSheet("Config");
+    configSheet.setRecords([{ key: "FOO", value: 1 }]);
+
+    const structuredSheet = workbook.addSheet("Structured");
+    structuredSheet.setRow(1, ["@config"]);
+    structuredSheet.setRow(2, ["id", "key", "value", "value_type", "value_comment"]);
+    structuredSheet.setRow(3, ["auto", "string", "string", "string", "string"]);
+    structuredSheet.setRow(4, [">>", null, null, null, null]);
+    structuredSheet.setRow(5, ["!!!", "x", "x", "x", "x"]);
+    structuredSheet.setRow(6, ["###", "键", "值", "值类型", "描述"]);
+    structuredSheet.setRow(7, ["-", "BAR", 2, "int", "示例"]);
+    await workbook.save(inputPath);
+
+    const result = await runCliCapture(["inspect", inputPath]);
+    assert.equal(result.exitCode, 0);
+
+    const payload = JSON.parse(result.stdout);
+    const dataSheet = payload.sheets.find((sheet: { name: string }) => sheet.name === "Data");
+    const config = payload.sheets.find((sheet: { name: string }) => sheet.name === "Config");
+    const structured = payload.sheets.find((sheet: { name: string }) => sheet.name === "Structured");
+
+    assert.ok(dataSheet);
+    assert.deepEqual(dataSheet.recommendedRead, {
+      commands: {
+        list: `fastxlsx sheet records list '${inputPath}' --sheet 'Data' --header-row 1`,
+      },
+      dataStartRow: 2,
+      headerRow: 1,
+      keyFields: ["id"],
+      mode: "sheet",
+      reason: "row 1 looks like the business header row and data begins immediately below it",
+    });
+
+    assert.ok(config);
+    assert.deepEqual(config.recommendedRead, {
+      commands: {
+        list: `fastxlsx config-table list '${inputPath}' --sheet 'Config' --header-row 1`,
+      },
+      dataStartRow: 2,
+      headerRow: 1,
+      keyFields: ["key"],
+      mode: "config-table",
+      reason: "row 1 looks like the business header row and the headers include key/value fields",
+    });
+
+    assert.ok(structured);
+    assert.deepEqual(structured.recommendedRead, {
+      commands: {
+        generateProfiles: `fastxlsx table generate-profiles '${inputPath}'`,
+        inspect: `fastxlsx table inspect '${inputPath}' --sheet 'Structured' --header-row 2 --data-start-row 7`,
+        list: `fastxlsx table list '${inputPath}' --sheet 'Structured' --header-row 2 --data-start-row 7`,
+      },
+      dataStartRow: 7,
+      headerRow: 2,
+      keyFields: ["key"],
+      mode: "table",
+      profileName: "router#Structured",
+      reason: 'row 1 starts with marker header "@config"; business headers were inferred at row 2 and data starts at row 7',
+    });
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

@@ -46,7 +46,45 @@ fastxlsx get path/to/file.xlsx --sheet Sheet1 --cell B2
 fastxlsx validate path/to/file.xlsx
 ```
 
+`inspect` now returns a `recommendedRead` object per sheet. Follow that routing hint before choosing between `sheet`, `config-table`, and `table`, and prefer reusing `recommendedRead.commands.*` directly instead of rebuilding the command by hand.
+
 Use `--in-place` only when the user clearly wants to overwrite the source workbook.
+
+## Hard Routing Rules
+
+Keep these rules ahead of guesswork:
+
+- Do not abandon this skill after the first failed, empty, or obviously misaligned read. Re-route within the CLI first.
+- After `inspect`, prefer the target sheet's `recommendedRead.commands.*` output over hand-built read commands. Only override it when the user explicitly provides different row boundaries or a different sheet target.
+- Do not start with `table` for an arbitrary sheet unless a profile already exists or header and data row boundaries are known.
+- Do not treat `config-table` as the generic reader for every config-like sheet. Use it when one header row directly names the fields being edited.
+- If `inspect` shows marker headers such as `@config` or `@define;...`, row 1 is not the business header row. Re-run discovery with another header row or generate a table profile.
+- If a read returns structure rows such as `int`, `string`, `auto`, `>>`, `!!!`, `###`, or `-`, you are not looking at final business rows yet.
+
+## Read Recovery
+
+When the first read does not return the rows the user asked for, follow this order:
+
+1. Run `fastxlsx inspect path/to/file.xlsx` and confirm the sheet name, previewed headers, and `recommendedRead` route.
+2. If `recommendedRead.commands.list` or `recommendedRead.commands.inspect` matches the user's target, run that suggested command first instead of constructing a new one.
+3. If row 1 looks like a marker row rather than real field names, re-run discovery with another preview row:
+
+```bash
+fastxlsx inspect path/to/file.xlsx --header-row 2
+```
+
+4. If `sheet records list` or `sheet export` returns type rows or structure markers instead of business rows, switch to `table` with explicit boundaries or a generated profile:
+
+```bash
+fastxlsx table generate-profiles path/to/file.xlsx
+fastxlsx table inspect path/to/file.xlsx --sheet Sheet1 --header-row 1 --data-start-row 6
+fastxlsx table list path/to/file.xlsx --profile 'file#Sheet1'
+```
+
+5. If `table ... --profile` fails because the profile does not exist yet, generate profiles and retry. If profile inference still cannot find the sheet, fall back to explicit `--header-row` and `--data-start-row`.
+6. Re-read the exact row or cell after switching commands so the final answer is based on workbook output, not on the intended command.
+
+Treat "wrong rows returned" as a routing problem, not as proof that the CLI cannot answer the question.
 
 ## Command Choice
 
@@ -66,6 +104,8 @@ fastxlsx sheet export path/to/file.xlsx --sheet Data --format csv --output rows.
 ```
 
 Do not use `table inspect`, `table list`, or `table get` merely to read an arbitrary worksheet. `table` is for structured sheets where a profile already exists or the header row, data start row, and key fields are explicitly known.
+
+Plain `sheet` reads fit best when row 1 is the real header row and business data starts immediately underneath it. If the first returned records look like schema rows, comments, validators, or sentinels, switch to `table`.
 
 Use `set` for single-cell edits:
 
@@ -110,7 +150,7 @@ Use `upsert` only when the payload contains the full row you want after the comm
 
 Use `replace` only when the whole record set or table body should be rewritten.
 
-Use `config-table` for header-based config sheets where each row is a record under one header row:
+Use `config-table` for simple header-based config sheets where one header row directly names the fields and the data rows begin immediately below it:
 
 ```bash
 fastxlsx config-table init path/to/file.xlsx --sheet Config --headers '["Key","Value"]' --output out.xlsx
@@ -123,6 +163,8 @@ fastxlsx config-table replace path/to/file.xlsx --sheet Config --records '[{"Key
 fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.json --mode update --output out.xlsx
 fastxlsx config-table sync path/to/file.xlsx --sheet Config --from-json config.json --mode upsert --output out.xlsx
 ```
+
+If `inspect` shows marker headers such as `@config`, or the actual config fields only appear on a later row, do not keep forcing `config-table` with the default header row. Re-run discovery with another `--header-row`, or generate a profile and use `table --profile` instead.
 
 Use `table` for structured sheets with explicit header and data row boundaries, not as the generic sheet reader:
 
@@ -139,6 +181,8 @@ fastxlsx table sync path/to/file.xlsx --sheet main --header-row 1 --data-start-r
 
 Treat rows such as `auto`, `>>`, `!!!`, `###`, and `-` as structure to preserve, not built-in business semantics.
 
+These marker rows are a strong signal that `table` is the right reader, usually with a `dataStartRow` after the marker block.
+
 ## Profiles
 
 If `table-profiles.json` already exists, prefer `--profile`. The default profiles file is `table-profiles.json`; override it with `--profiles-file` when needed.
@@ -154,6 +198,8 @@ fastxlsx table upsert res/task.xlsx --profile 'task#main' --record '{"id":1001,"
 fastxlsx table sync res/task.xlsx --profile 'task#conf' --from-json conf.json --mode update --output out.xlsx
 fastxlsx table sync res/task.xlsx --profile 'task#conf' --from-json conf.json --mode upsert --output out.xlsx
 ```
+
+When a workbook uses metadata rows, sentinel rows, composite keys, or non-row-1 headers, prefer generating or reusing profiles early. This is often the fastest way to get clean reads.
 
 If profiles do not exist yet, generate them first:
 

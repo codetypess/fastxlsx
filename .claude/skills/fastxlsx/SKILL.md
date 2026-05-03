@@ -19,6 +19,8 @@ Keep this file short. Detailed workflow rules live in [WORKFLOW.md](WORKFLOW.md)
 - Deterministic multi-step edits through `apply --ops`
 - Roundtrip validation after workbook changes
 
+When a read command returns the wrong shape, empty results, or structure rows instead of business rows, stay inside the `fastxlsx` workflow, start from `inspect`, and prefer reusing that sheet's `recommendedRead.commands.*` output before inventing your own fallback command.
+
 ## Command Entry
 
 For `.xlsx` tasks in Claude Code, read this skill's workflow first:
