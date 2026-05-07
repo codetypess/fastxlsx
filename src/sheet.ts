@@ -34,6 +34,11 @@ import type {
   SheetSelection,
   SheetTable as SheetTableHandle,
   SheetPrintTitles,
+  SheetWindowColumnEntry,
+  SheetWindowCell,
+  SheetWindowReadOptions,
+  SheetWindowRowEntry,
+  SheetWindowSnapshot,
   SortRangeOptions,
   SheetTableSummary,
   SheetUpdateRecordResult,
@@ -62,6 +67,7 @@ import {
   normalizeRangeRef,
   normalizeSqref,
   parseRangeRef,
+  numberToColumnLabel,
   splitCellAddress,
 } from "./sheet/sheet-address.js";
 import {
@@ -214,6 +220,7 @@ import {
   upsertFreezePaneInSheetXml,
   upsertSheetSelectionInSheetXml,
 } from "./sheet/sheet-view-metadata.js";
+import { readWorkbookSheetWindow } from "./workbook/workbook-window-read.js";
 import type { Workbook } from "./workbook.js";
 import { resolvePosix } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
@@ -1490,6 +1497,69 @@ export class Sheet {
    */
   getPhysicalRangeRef(): string | null {
     return formatUsedRangeBounds(this.getPhysicalBounds());
+  }
+
+  /**
+   * Reads a sparse worksheet window plus related layout metadata.
+   */
+  readWindow(options: SheetWindowReadOptions): SheetWindowSnapshot {
+    this.ensureReadableState();
+    return readWorkbookSheetWindow(this.workbook, this, options);
+  }
+
+  /**
+   * Iterates sparse logical cells inside one requested window.
+   */
+  *iterWindowCells(options: SheetWindowReadOptions): IterableIterator<SheetWindowCell> {
+    for (const cell of this.readWindow(options).cells) {
+      yield cell;
+    }
+  }
+
+  /**
+   * Iterates row metadata inside one requested window.
+   */
+  *iterWindowRows(options: SheetWindowReadOptions): IterableIterator<SheetWindowRowEntry> {
+    const window = this.readWindow(options);
+    if (!window.clampedRange) {
+      return;
+    }
+
+    const { startRow, endRow } = parseRangeRef(window.clampedRange);
+    const hiddenRows = new Set(window.hiddenRows);
+    for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
+      yield {
+        alignment: window.rowAlignments[String(rowNumber)] ?? null,
+        height: window.rowHeights[String(rowNumber)] ?? null,
+        hidden: hiddenRows.has(rowNumber),
+        rowNumber,
+        styleId: window.rowStyleIds[String(rowNumber)] ?? null,
+      };
+    }
+  }
+
+  /**
+   * Iterates column metadata inside one requested window.
+   */
+  *iterWindowColumns(options: SheetWindowReadOptions): IterableIterator<SheetWindowColumnEntry> {
+    const window = this.readWindow(options);
+    if (!window.clampedRange) {
+      return;
+    }
+
+    const { startColumn, endColumn } = parseRangeRef(window.clampedRange);
+    const hiddenColumns = new Set(window.hiddenColumns);
+    for (let columnNumber = startColumn; columnNumber <= endColumn; columnNumber += 1) {
+      const columnLabel = numberToColumnLabel(columnNumber);
+      yield {
+        alignment: window.columnAlignments[columnLabel] ?? null,
+        columnLabel,
+        columnNumber,
+        hidden: hiddenColumns.has(columnLabel),
+        styleId: window.columnStyleIds[columnLabel] ?? null,
+        width: window.columnWidths[columnLabel] ?? null,
+      };
+    }
   }
 
   /**
@@ -3285,8 +3355,8 @@ export class Sheet {
   }
 
   private getSheetIndex(flushPendingMutations = true): SheetIndex {
-    if (flushPendingMutations && this.hasPendingCellMutations) {
-      this.flushPendingCellMutations();
+    if (flushPendingMutations) {
+      this.ensureReadableState();
     }
 
     if (this.sheetIndex) {
@@ -3295,6 +3365,12 @@ export class Sheet {
 
     this.sheetIndex = buildSheetIndex(this.workbook, this.workbook.readEntryText(this.path));
     return this.sheetIndex;
+  }
+
+  private ensureReadableState(): void {
+    if (this.hasPendingCellMutations) {
+      this.flushPendingCellMutations();
+    }
   }
 
   private getCurrentCellWriteState(address: string): CurrentCellWriteState {

@@ -60,6 +60,11 @@ export type {
   SheetImportRecordsResult,
   SheetUpdateRecordResult,
   SheetSelection,
+  SheetWindowColumnEntry,
+  SheetWindowCell,
+  SheetWindowRowEntry,
+  SheetWindowReadOptions,
+  SheetWindowSnapshot,
   SheetPrintTitles,
   SheetProtection,
   SheetProtectionOptions,
@@ -77,4 +82,6 @@ export type {
   SheetTableSummary,
   SheetTableWithAutoFilterSummary,
   Top10FilterColumn,
+  WorkbookManifest,
+  WorkbookSheetManifest,
 } from "./types.js";

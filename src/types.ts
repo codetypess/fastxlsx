@@ -293,6 +293,19 @@ export interface DefinedName {
   value: string;
 }
 
+export interface WorkbookSheetManifest {
+  name: string;
+  visibility: SheetVisibility;
+}
+
+export interface WorkbookManifest {
+  sheetCount: number;
+  visibleSheetCount: number;
+  activeSheetName: string | null;
+  sheets: WorkbookSheetManifest[];
+  definedNames: DefinedName[];
+}
+
 export interface Hyperlink {
   address: string;
   target: string;
@@ -305,6 +318,56 @@ export interface FreezePane {
   rowCount: number;
   topLeftCell: string;
   activePane: "bottomLeft" | "topRight" | "bottomRight" | null;
+}
+
+export interface SheetWindowReadOptions {
+  startRow: number;
+  endRow: number;
+  startColumn: number;
+  endColumn: number;
+}
+
+export interface SheetWindowCell extends CellEntry {
+  displayValue: string | null;
+}
+
+export interface SheetWindowRowEntry {
+  alignment: CellStyleAlignment | null;
+  hidden: boolean;
+  height: number | null;
+  rowNumber: number;
+  styleId: number | null;
+}
+
+export interface SheetWindowColumnEntry {
+  alignment: CellStyleAlignment | null;
+  columnLabel: string;
+  columnNumber: number;
+  hidden: boolean;
+  styleId: number | null;
+  width: number | null;
+}
+
+export interface SheetWindowSnapshot {
+  sheetName: string;
+  requestedRange: string;
+  clampedRange: string | null;
+  sheetRange: string | null;
+  rowCount: number;
+  columnCount: number;
+  cells: SheetWindowCell[];
+  cellAlignments: Record<string, CellStyleAlignment>;
+  rowAlignments: Record<string, CellStyleAlignment>;
+  columnAlignments: Record<string, CellStyleAlignment>;
+  rowStyleIds: Record<string, number>;
+  rowHeights: Record<string, number>;
+  hiddenRows: number[];
+  columnStyleIds: Record<string, number>;
+  columnWidths: Record<string, number>;
+  hiddenColumns: string[];
+  mergedRanges: string[];
+  freezePane: FreezePane | null;
+  autoFilter: AutoFilterDefinition | null;
 }
 
 export interface SheetSelection {

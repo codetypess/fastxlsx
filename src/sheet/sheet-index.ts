@@ -406,7 +406,7 @@ function parseCellValue(
   return Number.isFinite(numericValue) ? numericValue : decodeXmlText(valueSource);
 }
 
-function buildCellSnapshot(
+export function buildCellSnapshot(
   workbook: Workbook,
   rawType: string | null,
   styleId: number | null,
@@ -484,7 +484,7 @@ function extractCellStyleAttr(attributesSource: string): string | undefined {
   return readXmlAttrFast(attributesSource, "s");
 }
 
-function parseRowTagMetadata(source: string): {
+export function parseRowTagMetadata(source: string): {
   attributesSource: string;
   rowNumberText: string | undefined;
   selfClosing: boolean;
@@ -498,7 +498,7 @@ function parseRowTagMetadata(source: string): {
   };
 }
 
-function parseCellTagMetadata(source: string): {
+export function parseCellTagMetadata(source: string): {
   addressSource: string | undefined;
   attributesSource: string;
   rawType: string | null;

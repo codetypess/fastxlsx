@@ -667,7 +667,7 @@ Common commands:
 - `npm run bench:check`
   - Run a 5-iteration benchmark on `res/monster.xlsx` and validate the non-null count plus the configured read/write thresholds from `benchmarks/monster-baseline.json`
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
-  - Run the benchmark with a custom file path and iteration count; the JSON output includes dense traversal (`result`), sparse traversal (`sparseResult`), a batch write scenario (`writeResult`), and per-sheet amplification stats
+  - Run the benchmark with a custom file path and iteration count; the JSON output includes manifest reads (`manifestResult`), viewport reads (`windowResult`), dense traversal (`result`), sparse traversal (`sparseResult`), a batch write scenario (`writeResult`), and per-sheet amplification stats
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
   - Run the regression check against any benchmark file; the process exits non-zero when the workbook count or configured read/write timing thresholds are exceeded
 

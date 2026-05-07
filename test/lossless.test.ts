@@ -151,6 +151,258 @@ test("workbook can create a configured workbook from options", async () => {
   assert.match(coreXml, /<cp:lastModifiedBy>Bob<\/cp:lastModifiedBy>/);
 });
 
+test("workbook manifests are detached and refresh after writes", () => {
+  const workbook = Workbook.create({
+    activeSheet: "Data",
+    sheets: [{ name: "Config" }, { name: "Data" }, { name: "Hidden", visibility: "hidden" }],
+  });
+
+  workbook.setDefinedName("GlobalName", "Data!A1");
+  workbook.setDefinedName("LocalName", "Config!A1", { scope: "Config" });
+
+  const manifest = workbook.getManifest();
+  assert.deepEqual(manifest, {
+    activeSheetName: "Data",
+    definedNames: [
+      { hidden: false, name: "GlobalName", scope: null, value: "Data!A1" },
+      { hidden: false, name: "LocalName", scope: "Config", value: "Config!A1" },
+    ],
+    sheetCount: 3,
+    sheets: [
+      { name: "Config", visibility: "visible" },
+      { name: "Data", visibility: "visible" },
+      { name: "Hidden", visibility: "hidden" },
+    ],
+    visibleSheetCount: 2,
+  });
+
+  manifest.sheets[0]!.name = "Changed";
+  assert.equal(workbook.getSheetNames()[0], "Config");
+
+  workbook.renameSheet("Data", "Main");
+  workbook.setActiveSheet("Main");
+  workbook.setSheetVisibility("Hidden", "veryHidden");
+
+  assert.deepEqual(workbook.getManifest(), {
+    activeSheetName: "Main",
+    definedNames: [
+      { hidden: false, name: "GlobalName", scope: null, value: "Main!A1" },
+      { hidden: false, name: "LocalName", scope: "Config", value: "Config!A1" },
+    ],
+    sheetCount: 3,
+    sheets: [
+      { name: "Config", visibility: "visible" },
+      { name: "Main", visibility: "visible" },
+      { name: "Hidden", visibility: "veryHidden" },
+    ],
+    visibleSheetCount: 2,
+  });
+});
+
+test("sheet window reads sparse cells and layout metadata", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", "Header");
+  sheet.setCell("B1", "Value");
+  sheet.setCell("A2", "Alpha");
+  sheet.setCell("B2", 10);
+  sheet.setFormula("C2", "B2*2", { cachedValue: 20 });
+  sheet.setCell("A3", true);
+  sheet.setCell("D4", "Tail");
+  const alignedStyleId = sheet.setAlignment("B2", { horizontal: "center" });
+  sheet.setRowStyleId(2, alignedStyleId);
+  sheet.setRowHeight(2, 24);
+  sheet.setRowHidden(4, true);
+  sheet.setColumnStyleId("B", alignedStyleId);
+  sheet.setColumnWidth("B", 18);
+  sheet.setColumnHidden("D", true);
+  sheet.freezePane(1, 1);
+  sheet.setAutoFilter("A1:D4");
+  sheet.addMergedRange("B2:C3");
+
+  const window = workbook.readSheetWindow("Sheet1", {
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 4,
+    endRow: 4,
+  });
+
+  assert.equal(window.requestedRange, "A1:D4");
+  assert.equal(window.clampedRange, "A1:D4");
+  assert.equal(window.sheetRange, "A1:D4");
+  assert.equal(window.rowCount, 4);
+  assert.equal(window.columnCount, 4);
+  assert.deepEqual(window.freezePane, {
+    activePane: "bottomRight",
+    columnCount: 1,
+    rowCount: 1,
+    topLeftCell: "B2",
+  });
+  assert.deepEqual(window.autoFilter, sheet.getAutoFilterDefinition());
+  assert.deepEqual(window.mergedRanges, ["B2:C3"]);
+  assert.deepEqual(window.rowStyleIds, { "2": alignedStyleId });
+  assert.deepEqual(window.rowHeights, { "2": 24 });
+  assert.deepEqual(window.hiddenRows, [4]);
+  assert.deepEqual(window.columnStyleIds, { B: alignedStyleId });
+  assert.deepEqual(window.columnWidths, { B: 18 });
+  assert.deepEqual(window.hiddenColumns, ["D"]);
+  assert.deepEqual(window.cellAlignments, { B2: { horizontal: "center" } });
+  assert.deepEqual(window.rowAlignments, { "2": { horizontal: "center" } });
+  assert.deepEqual(window.columnAlignments, { B: { horizontal: "center" } });
+
+  const cells = Object.fromEntries(window.cells.map((cell) => [cell.address, cell]));
+  assert.equal(cells.A1?.displayValue, "Header");
+  assert.equal(cells.B2?.displayValue, "10");
+  assert.equal(cells.C2?.formula, "B2*2");
+  assert.equal(cells.C2?.displayValue, "20");
+  assert.equal(cells.A3?.displayValue, "TRUE");
+  assert.equal(cells.D4?.displayValue, "Tail");
+  assert.equal(cells.C1, undefined);
+
+  assert.deepEqual(
+    Array.from(sheet.iterWindowCells({
+      startColumn: 1,
+      startRow: 1,
+      endColumn: 4,
+      endRow: 4,
+    })).map((cell) => cell.address),
+    window.cells.map((cell) => cell.address),
+  );
+  assert.deepEqual(
+    Array.from(sheet.iterWindowRows({
+      startColumn: 1,
+      startRow: 1,
+      endColumn: 4,
+      endRow: 4,
+    })).find((row) => row.rowNumber === 2),
+    {
+      alignment: { horizontal: "center" },
+      height: 24,
+      hidden: false,
+      rowNumber: 2,
+      styleId: alignedStyleId,
+    },
+  );
+  assert.deepEqual(
+    Array.from(sheet.iterWindowColumns({
+      startColumn: 1,
+      startRow: 1,
+      endColumn: 4,
+      endRow: 4,
+    })).find((column) => column.columnNumber === 2),
+    {
+      alignment: { horizontal: "center" },
+      columnLabel: "B",
+      columnNumber: 2,
+      hidden: false,
+      styleId: alignedStyleId,
+      width: 18,
+    },
+  );
+
+  const emptyWindow = sheet.readWindow({
+    startColumn: 1,
+    startRow: 10,
+    endColumn: 2,
+    endRow: 12,
+  });
+  assert.equal(emptyWindow.clampedRange, null);
+  assert.equal(emptyWindow.cells.length, 0);
+  assert.equal(emptyWindow.rowCount, 4);
+  assert.equal(emptyWindow.columnCount, 4);
+});
+
+test("sheet windows resolve shared formulas outside the requested viewport", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1"><f t="shared" ref="A1:B2" si="0">B1+$C$1+D$1+$E2+SUM(F1:G2)</f><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="B2" s="1"><f t="shared" si="0"/><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const window = Workbook.fromEntries(entries).readSheetWindow("Sheet1", {
+    startColumn: 2,
+    startRow: 2,
+    endColumn: 2,
+    endRow: 2,
+  });
+
+  assert.equal(window.cells.length, 1);
+  assert.equal(window.cells[0]?.address, "B2");
+  assert.equal(window.cells[0]?.formula, "C2+$C$1+E$1+$E3+SUM(G2:H3)");
+  assert.equal(window.cells[0]?.displayValue, "2");
+});
+
+test("sheet windows ignore row spans when resolving row styles", async () => {
+  const fixtureDir = resolve("test/fixtures/lossless-source");
+  const entries = replaceEntryText(
+    await loadFixtureEntries(fixtureDir),
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1" spans="1:1">
+      <c r="A1" t="inlineStr"><is><t>Hello</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+  );
+  const window = Workbook.fromEntries(entries).readSheetWindow("Sheet1", {
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 1,
+    endRow: 1,
+  });
+
+  assert.deepEqual(window.rowStyleIds, {});
+  assert.deepEqual(window.rowAlignments, {});
+  assert.equal(window.cells[0]?.address, "A1");
+  assert.equal(window.cells[0]?.displayValue, "Hello");
+});
+
+test("sheet windows refresh after structural edits", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", "Left");
+  sheet.setCell("B1", "Middle");
+  sheet.setCell("B2", "Tail");
+  sheet.addMergedRange("A1:B1");
+
+  const before = sheet.readWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 2,
+    endRow: 2,
+  });
+  assert.deepEqual(before.cells.map((cell) => cell.address), ["A1", "B1", "B2"]);
+
+  sheet.insertColumn("A");
+
+  const after = sheet.readWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 3,
+    endRow: 2,
+  });
+  assert.equal(after.sheetRange, "B1:C2");
+  assert.deepEqual(after.mergedRanges, ["B1:C1"]);
+  assert.deepEqual(after.cells.map((cell) => cell.address), ["B1", "C1", "C2"]);
+  assert.equal(after.cells.find((cell) => cell.address === "B1")?.displayValue, "Left");
+  assert.equal(after.cells.find((cell) => cell.address === "C1")?.displayValue, "Middle");
+  assert.equal(after.cells.find((cell) => cell.address === "C2")?.displayValue, "Tail");
+});
+
 test("workbook supports ArrayBuffer open flows", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const zipped = Workbook.fromEntries(await loadFixtureEntries(fixtureDir)).toUint8Array();

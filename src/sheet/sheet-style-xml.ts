@@ -3,7 +3,7 @@ import { buildXmlContainer, findWorksheetChildInsertionIndex, replaceXmlTagSourc
 import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
 import { getXmlAttr, parseAttributes, serializeAttributes } from "../utils/xml.js";
 
-interface ColumnDefinition {
+export interface ColumnDefinition {
   min: number;
   max: number;
   attributes: Array<[string, string]>;
@@ -56,8 +56,7 @@ export function parseRowStyleId(attributesSource: string | undefined): number | 
     return null;
   }
 
-  const styleId = getXmlAttr(attributesSource, "s");
-  return styleId === undefined ? null : Number(styleId);
+  return parseIntegerAttribute(parseAttributes(attributesSource), "s");
 }
 
 export function parseColumnStyleId(sheetXml: string, columnNumber: number): number | null {
@@ -68,8 +67,7 @@ export function parseColumnStyleId(sheetXml: string, columnNumber: number): numb
       continue;
     }
 
-    const styleText = getXmlAttr(serializeAttributes(definition.attributes), "style");
-    styleId = styleText === undefined ? null : Number(styleText);
+    styleId = parseIntegerAttribute(definition.attributes, "style");
   }
 
   return styleId;
@@ -267,7 +265,7 @@ function buildRowAttributes(
   return nextAttributes;
 }
 
-function parseColumnDefinitions(sheetXml: string): ColumnDefinition[] {
+export function parseColumnDefinitions(sheetXml: string): ColumnDefinition[] {
   const colsTag = findFirstXmlTag(sheetXml, "cols");
   if (!colsTag || colsTag.innerXml === null) {
     return [];
@@ -479,4 +477,9 @@ function parseNumericAttribute(attributes: Array<[string, string]>, name: string
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseIntegerAttribute(attributes: Array<[string, string]>, name: string): number | null {
+  const parsed = parseNumericAttribute(attributes, name);
+  return Number.isInteger(parsed) ? parsed : null;
 }

@@ -12,6 +12,26 @@ export interface BenchmarkResult {
   visitedCells: number;
 }
 
+export interface ManifestBenchmarkResult {
+  mode: "manifest";
+  runs: number[];
+  averageMs: number;
+  sheetCount: number;
+  visibleSheetCount: number;
+}
+
+export interface WindowBenchmarkResult {
+  mode: "window";
+  runs: number[];
+  averageMs: number;
+  sheet: string;
+  range: string;
+  rowCount: number;
+  columnCount: number;
+  nonNull: number;
+  visitedCells: number;
+}
+
 export interface BatchWriteBenchmarkResult {
   mode: "batch-write";
   runs: number[];
@@ -39,12 +59,16 @@ export interface BenchmarkComparison {
   denseVisitedCells: number;
   sparseVisitedCells: number;
   denseAmplification: number;
+  manifestSheetCount: number;
+  windowVisitedCells: number;
 }
 
 export interface BenchmarkBaseline {
   expectedNonNull: number;
+  maxManifestAverageMs?: number;
   maxAverageMs?: number;
   maxSparseAverageMs?: number;
+  maxWindowAverageMs?: number;
   expectedBatchWriteSheet?: string;
   expectedBatchWriteWrites?: number;
   maxBatchWriteAverageMs?: number;
@@ -56,6 +80,8 @@ export async function runBenchmark(options: {
 } = {}): Promise<{
   file: string;
   iterations: number;
+  manifestResult: ManifestBenchmarkResult;
+  windowResult: WindowBenchmarkResult;
   result: BenchmarkResult;
   sparseResult: BenchmarkResult;
   writeResult: BatchWriteBenchmarkResult;
@@ -65,19 +91,26 @@ export async function runBenchmark(options: {
   const filePath = options.filePath ?? resolve(process.cwd(), "res/monster.xlsx");
   const iterations = options.iterations ?? 3;
   const summary = await summarizeWorkbook(filePath);
+  const windowTargetSheetName = resolveMaxPhysicalSheetName(summary);
+  const manifestResult = await benchmarkManifestWorkbook(filePath, iterations);
+  const windowResult = await benchmarkWindowWorkbook(filePath, iterations, windowTargetSheetName);
   const result = await benchmark(iterations, "dense", () => benchmarkDenseWorkbook(filePath));
   const sparseResult = await benchmark(iterations, "sparse", () => benchmarkSparseWorkbook(filePath));
   const writeResult = await benchmarkBatchWrites(filePath, iterations);
   const comparison = {
     denseVisitedCells: result.visitedCells,
+    manifestSheetCount: manifestResult.sheetCount,
     sparseVisitedCells: sparseResult.visitedCells,
     denseAmplification:
       sparseResult.nonNull === 0 ? 0 : Number((result.visitedCells / sparseResult.nonNull).toFixed(2)),
+    windowVisitedCells: windowResult.visitedCells,
   };
 
   return {
     file: filePath,
     iterations,
+    manifestResult,
+    windowResult,
     result,
     sparseResult,
     writeResult,
@@ -134,6 +167,72 @@ async function benchmarkDenseWorkbook(filePath: string): Promise<{ nonNull: numb
   }
 
   return { nonNull, visitedCells };
+}
+
+async function benchmarkManifestWorkbook(
+  filePath: string,
+  iterations: number,
+): Promise<ManifestBenchmarkResult> {
+  const runs: number[] = [];
+  let sheetCount = 0;
+  let visibleSheetCount = 0;
+
+  for (let index = 0; index < iterations; index += 1) {
+    const startedAt = performance.now();
+    const workbook = await Workbook.open(filePath);
+    const manifest = workbook.getManifest();
+    sheetCount = manifest.sheetCount;
+    visibleSheetCount = manifest.visibleSheetCount;
+    runs.push(Number((performance.now() - startedAt).toFixed(1)));
+  }
+
+  return {
+    mode: "manifest",
+    runs,
+    averageMs: Number((runs.reduce((sum, value) => sum + value, 0) / runs.length).toFixed(1)),
+    sheetCount,
+    visibleSheetCount,
+  };
+}
+
+async function benchmarkWindowWorkbook(
+  filePath: string,
+  iterations: number,
+  targetSheetName: string,
+): Promise<WindowBenchmarkResult> {
+  const runs: number[] = [];
+  let sheet = "";
+  let range = "";
+  let rowCount = 0;
+  let columnCount = 0;
+  let nonNull = 0;
+  let visitedCells = 0;
+
+  for (let index = 0; index < iterations; index += 1) {
+    const startedAt = performance.now();
+    const workbook = await Workbook.open(filePath);
+    const targetSheet = workbook.getSheet(targetSheetName);
+    const window = readViewportWindow(targetSheet);
+    sheet = targetSheet.name;
+    range = window.clampedRange ?? window.requestedRange;
+    rowCount = window.rowCount;
+    columnCount = window.columnCount;
+    visitedCells = window.cells.length;
+    nonNull = window.cells.filter((cell) => cell.value !== null).length;
+    runs.push(Number((performance.now() - startedAt).toFixed(1)));
+  }
+
+  return {
+    mode: "window",
+    runs,
+    averageMs: Number((runs.reduce((sum, value) => sum + value, 0) / runs.length).toFixed(1)),
+    sheet,
+    range,
+    rowCount,
+    columnCount,
+    nonNull,
+    visitedCells,
+  };
 }
 
 async function benchmarkSparseWorkbook(filePath: string): Promise<{ nonNull: number; visitedCells: number }> {
@@ -236,6 +335,35 @@ function selectBatchWriteTargetSheet(workbook: Workbook) {
   }
 
   return targetSheet;
+}
+
+function resolveMaxPhysicalSheetName(summary: SheetBenchmarkSummary[]): string {
+  const [firstSheet] = summary;
+  if (!firstSheet) {
+    throw new Error("Workbook has no worksheets to benchmark");
+  }
+
+  let targetSheet = firstSheet;
+  for (let index = 1; index < summary.length; index += 1) {
+    const sheet = summary[index]!;
+    if (sheet.physicalCellCount > targetSheet.physicalCellCount) {
+      targetSheet = sheet;
+    }
+  }
+
+  return targetSheet.name;
+}
+
+function readViewportWindow(sheet: ReturnType<Workbook["getSheets"]>[number]) {
+  const endRow = Math.min(sheet.rowCount || 1, 50);
+  const endColumn = Math.min(sheet.columnCount || 1, 20);
+
+  return sheet.readWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn,
+    endRow,
+  });
 }
 
 function resolveBatchWriteScenario(sheet: ReturnType<Workbook["getSheets"]>[number]): {
@@ -364,8 +492,16 @@ function validateAgainstBaseline(
     failures.push(`Average ${local.averageMs}ms exceeded ${baseline.maxAverageMs}ms`);
   }
 
+  if (baseline.maxManifestAverageMs !== undefined && result.manifestResult.averageMs > baseline.maxManifestAverageMs) {
+    failures.push(`Manifest average ${result.manifestResult.averageMs}ms exceeded ${baseline.maxManifestAverageMs}ms`);
+  }
+
   if (baseline.maxSparseAverageMs !== undefined && result.sparseResult.averageMs > baseline.maxSparseAverageMs) {
     failures.push(`Sparse average ${result.sparseResult.averageMs}ms exceeded ${baseline.maxSparseAverageMs}ms`);
+  }
+
+  if (baseline.maxWindowAverageMs !== undefined && result.windowResult.averageMs > baseline.maxWindowAverageMs) {
+    failures.push(`Window average ${result.windowResult.averageMs}ms exceeded ${baseline.maxWindowAverageMs}ms`);
   }
 
   if (baseline.expectedBatchWriteSheet !== undefined && result.writeResult.sheet !== baseline.expectedBatchWriteSheet) {

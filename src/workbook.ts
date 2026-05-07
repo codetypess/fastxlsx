@@ -24,7 +24,10 @@ import type {
   DefinedName,
   RecalculateSummary,
   SetDefinedNameOptions,
+  SheetWindowReadOptions,
+  SheetWindowSnapshot,
   SheetVisibility,
+  WorkbookManifest,
   WorkbookCreateOptions,
   WorkbookCreateSheetOptions,
 } from "./types.js";
@@ -130,6 +133,7 @@ import {
   type StylesCache,
 } from "./workbook/workbook-styles-parse.js";
 import { buildWorkbookTemplateEntries } from "./workbook/workbook-template.js";
+import { invalidateWorkbookReadCaches, readWorkbookManifest } from "./workbook/workbook-window-read.js";
 import { replaceXmlTagSource } from "./workbook/workbook-xml.js";
 import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook/workbook-context.js";
@@ -476,6 +480,20 @@ export class Workbook {
     const context = this.getWorkbookContext();
     const activeSheetIndex = parseActiveSheetIndex(this.readEntryText(context.workbookPath), context.sheets.length);
     return context.sheets[activeSheetIndex] ?? context.sheets[0]!;
+  }
+
+  /**
+   * Returns detached workbook shell metadata without hydrating worksheet cells.
+   */
+  getManifest(): WorkbookManifest {
+    return readWorkbookManifest(this);
+  }
+
+  /**
+   * Reads a sparse worksheet window plus related layout metadata.
+   */
+  readSheetWindow(sheetName: string, options: SheetWindowReadOptions): SheetWindowSnapshot {
+    return this.getSheet(sheetName).readWindow(options);
   }
 
   /**
@@ -1309,6 +1327,7 @@ export class Workbook {
     }
 
     this.entries.set(path, XML_ENCODER.encode(text));
+    invalidateWorkbookReadCaches(this);
   }
 
   removeEntry(path: string): void {
@@ -1327,6 +1346,8 @@ export class Workbook {
     if (shouldResetWorkbookContext(this.workbookContext, path) || this.workbookContext?.sharedStringsPath === path) {
       this.workbookContext = undefined;
     }
+
+    invalidateWorkbookReadCaches(this);
   }
 
   isBatching(): boolean {
