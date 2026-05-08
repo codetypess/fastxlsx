@@ -135,13 +135,16 @@ import {
   buildCommentsXml,
   COMMENTS_CONTENT_TYPE,
   COMMENTS_RELATIONSHIP_TYPE,
+  deleteWorksheetComments,
   ensureDefaultContentType,
   ensureLegacyDrawingInSheetXml,
+  filterCommentsInWindow,
   findSheetCommentParts,
   getNextCommentsPath,
   getNextVmlDrawingPath,
   parseCommentsXml,
   removeLegacyDrawingFromSheetXml,
+  shiftWorksheetComments,
   VML_CONTENT_TYPE,
   VML_DRAWING_RELATIONSHIP_TYPE,
 } from "./sheet/sheet-comments.js";
@@ -1781,6 +1784,14 @@ export class Sheet {
   }
 
   /**
+   * Lists worksheet comments inside one rectangular range.
+   */
+  getCommentsInRange(range: string): SheetComment[] {
+    const { startRow, endRow, startColumn, endColumn } = parseRangeRef(range);
+    return filterCommentsInWindow(this.getComments(), startRow, endRow, startColumn, endColumn);
+  }
+
+  /**
    * Lists worksheet hyperlinks.
    */
   getHyperlinks(): Hyperlink[] {
@@ -2219,6 +2230,7 @@ export class Sheet {
     assertInsertCount(count);
 
     const index = this.getSheetIndex();
+    const comments = this.getComments();
     let nextSheetXml = index.xml;
     const nextMergedRanges = this.getMergedRanges().map((range) =>
       shiftRangeRefRows(range, rowNumber, count),
@@ -2250,6 +2262,11 @@ export class Sheet {
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "shift");
     this.updateTableReferences(0, 0, rowNumber, count, "shift");
+    if (comments.length > 0) {
+      this.writeComments(
+        shiftWorksheetComments(comments, 0, 0, rowNumber, count),
+      );
+    }
   }
 
   /**
@@ -2262,6 +2279,7 @@ export class Sheet {
     assertInsertCount(count);
 
     const index = this.getSheetIndex();
+    const comments = this.getComments();
     let nextSheetXml = index.xml;
     const nextMergedRanges = this.getMergedRanges().map((range) =>
       shiftRangeRefColumns(range, columnNumber, count),
@@ -2301,6 +2319,11 @@ export class Sheet {
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "shift");
     this.updateTableReferences(columnNumber, count, 0, 0, "shift");
+    if (comments.length > 0) {
+      this.writeComments(
+        shiftWorksheetComments(comments, columnNumber, count, 0, 0),
+      );
+    }
   }
 
   /**
@@ -2313,6 +2336,7 @@ export class Sheet {
     assertInsertCount(count);
 
     const index = this.getSheetIndex();
+    const comments = this.getComments();
     const deleteEndRow = rowNumber + count - 1;
     let nextSheetXml = index.xml;
     const nextMergedRanges = this.getMergedRanges()
@@ -2342,6 +2366,11 @@ export class Sheet {
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, 0, 0, rowNumber, count, "delete");
     this.updateTableReferences(0, 0, rowNumber, count, "delete");
+    if (comments.length > 0) {
+      this.writeComments(
+        deleteWorksheetComments(comments, 0, 0, rowNumber, count),
+      );
+    }
   }
 
   /**
@@ -2354,6 +2383,7 @@ export class Sheet {
     assertInsertCount(count);
 
     const index = this.getSheetIndex();
+    const comments = this.getComments();
     let nextSheetXml = index.xml;
     const nextMergedRanges = this.getMergedRanges()
       .map((range) => deleteRangeRefColumns(range, columnNumber, count))
@@ -2385,6 +2415,11 @@ export class Sheet {
     );
     this.workbook.rewriteDefinedNamesForSheetStructure(this.name, columnNumber, count, 0, 0, "delete");
     this.updateTableReferences(columnNumber, count, 0, 0, "delete");
+    if (comments.length > 0) {
+      this.writeComments(
+        deleteWorksheetComments(comments, columnNumber, count, 0, 0),
+      );
+    }
   }
 
   /**
@@ -3495,6 +3530,93 @@ export class Sheet {
 
   private writeSheetRelationshipsXml(relationshipsXml: string): void {
     this.workbook.writeEntryText(getSheetRelationshipsPath(this.path), relationshipsXml);
+  }
+
+  private writeComments(nextComments: SheetComment[]): void {
+    const currentSheetXml = this.getSheetIndex().xml;
+    const currentRelationshipsXml = this.readSheetRelationshipsXml();
+    const entryPaths = this.workbook.listEntries();
+    const parts = findSheetCommentParts(currentSheetXml, this.path, currentRelationshipsXml);
+    const normalizedComments = [...nextComments].sort((left, right) => compareCellAddresses(left.address, right.address));
+
+    if (normalizedComments.length === 0) {
+      if (!parts.commentsPath || !entryPaths.includes(parts.commentsPath)) {
+        return;
+      }
+
+      let nextRelationshipsXml = currentRelationshipsXml;
+      let nextSheetXml = currentSheetXml;
+      let nextContentTypesXml = this.readContentTypesXml();
+
+      this.workbook.removeEntry(parts.commentsPath);
+      nextContentTypesXml = removeContentTypeOverride(nextContentTypesXml, parts.commentsPath);
+      if (parts.commentsRelationshipId) {
+        nextRelationshipsXml = removeRelationshipById(nextRelationshipsXml, parts.commentsRelationshipId);
+      }
+
+      if (parts.vmlPath) {
+        this.workbook.removeEntry(parts.vmlPath);
+      }
+      if (parts.vmlRelationshipId) {
+        nextRelationshipsXml = removeRelationshipById(nextRelationshipsXml, parts.vmlRelationshipId);
+      }
+
+      nextSheetXml = removeLegacyDrawingFromSheetXml(nextSheetXml);
+      if (nextSheetXml !== currentSheetXml) {
+        this.writeSheetXml(nextSheetXml);
+      }
+      if (nextRelationshipsXml !== currentRelationshipsXml) {
+        this.writeSheetRelationshipsXml(nextRelationshipsXml);
+      }
+      if (nextContentTypesXml !== this.readContentTypesXml()) {
+        this.writeContentTypesXml(nextContentTypesXml);
+      }
+      return;
+    }
+
+    let nextSheetXml = currentSheetXml;
+    let nextRelationshipsXml = currentRelationshipsXml;
+    let nextContentTypesXml = this.readContentTypesXml();
+
+    let commentsPath = parts.commentsPath;
+    if (!commentsPath) {
+      commentsPath = getNextCommentsPath(entryPaths);
+      const relationshipId = getNextRelationshipIdFromXml(nextRelationshipsXml);
+      nextRelationshipsXml = appendRelationship(
+        nextRelationshipsXml,
+        relationshipId,
+        COMMENTS_RELATIONSHIP_TYPE,
+        makeRelativeSheetRelationshipTarget(this.path, commentsPath),
+      );
+      nextContentTypesXml = addContentTypeOverride(nextContentTypesXml, commentsPath, COMMENTS_CONTENT_TYPE);
+    }
+
+    let vmlRelationshipId = parts.legacyDrawingRelationshipId;
+    let vmlPath = parts.vmlPath;
+    if (!vmlRelationshipId || !vmlPath) {
+      vmlRelationshipId = parts.legacyDrawingRelationshipId ?? getNextRelationshipIdFromXml(nextRelationshipsXml);
+      vmlPath = parts.vmlPath ?? getNextVmlDrawingPath(entryPaths);
+      nextRelationshipsXml = upsertRelationship(
+        nextRelationshipsXml,
+        vmlRelationshipId,
+        VML_DRAWING_RELATIONSHIP_TYPE,
+        makeRelativeSheetRelationshipTarget(this.path, vmlPath),
+      );
+      nextSheetXml = ensureLegacyDrawingInSheetXml(nextSheetXml, vmlRelationshipId);
+      nextContentTypesXml = ensureDefaultContentType(nextContentTypesXml, "vml", VML_CONTENT_TYPE);
+    }
+
+    this.workbook.writeEntryText(commentsPath, buildCommentsXml(normalizedComments));
+    this.workbook.writeEntryText(vmlPath, buildCommentsVmlDrawingXml(normalizedComments));
+    if (nextSheetXml !== currentSheetXml) {
+      this.writeSheetXml(nextSheetXml);
+    }
+    if (nextRelationshipsXml !== currentRelationshipsXml) {
+      this.writeSheetRelationshipsXml(nextRelationshipsXml);
+    }
+    if (nextContentTypesXml !== this.readContentTypesXml()) {
+      this.writeContentTypesXml(nextContentTypesXml);
+    }
   }
 
   private readContentTypesXml(): string {

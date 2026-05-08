@@ -9,3 +9,4 @@ Current specs:
 - [auto-filter.md](auto-filter.md)
 - [auto-filter-checklist.md](auto-filter-checklist.md)
 - [fastxlsx-load-performance.md](fastxlsx-load-performance.md)
+- [fastxlsx-worksheet-comments.md](fastxlsx-worksheet-comments.md)

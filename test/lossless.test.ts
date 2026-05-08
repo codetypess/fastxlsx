@@ -313,6 +313,51 @@ test("sheet window reads sparse cells and layout metadata", () => {
   assert.equal(emptyWindow.columnCount, 4);
 });
 
+test("sheet windows expose worksheet comments separately from sparse cells", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", "Header");
+  sheet.setCell("B2", 10);
+  sheet.setComment("B2", "Value note", { author: "Bob" });
+  sheet.setComment("C3", "Blank note", { author: "Alice" });
+
+  const window = sheet.readWindow({
+    startColumn: 2,
+    startRow: 2,
+    endColumn: 3,
+    endRow: 3,
+  });
+
+  assert.deepEqual(window.comments, [
+    { address: "B2", author: "Bob", text: "Value note" },
+    { address: "C3", author: "Alice", text: "Blank note" },
+  ]);
+  assert.equal(window.cells.find((cell) => cell.address === "C3"), undefined);
+  assert.deepEqual(sheet.getCommentsInRange("B2:C3"), window.comments);
+});
+
+test("sheet windows treat comment-only blank cells as used bounds", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("D5", "Only note", { author: "Alice" });
+
+  const window = sheet.readWindow({
+    startColumn: 4,
+    startRow: 5,
+    endColumn: 4,
+    endRow: 5,
+  });
+
+  assert.equal(window.sheetRange, "D5");
+  assert.equal(window.clampedRange, "D5");
+  assert.equal(window.rowCount, 5);
+  assert.equal(window.columnCount, 4);
+  assert.deepEqual(window.cells, []);
+  assert.deepEqual(window.comments, [{ address: "D5", author: "Alice", text: "Only note" }]);
+});
+
 test("sheet windows resolve shared formulas outside the requested viewport", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(
@@ -5022,6 +5067,88 @@ test("sheet comment APIs create, update, read, and delete comments", async () =>
   assert.equal(workbook.listEntries().includes("xl/drawings/vmlDrawing1.vml"), false);
 });
 
+test("insertRow shifts worksheet comments and preserves author and text after reload", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("A1", "Header", { author: "Alice" });
+  sheet.setComment("B3", "Body", { author: "Bob" });
+
+  sheet.insertRow(2);
+
+  const reopened = Workbook.fromEntries(workbook.toEntries());
+  const reopenedSheet = reopened.getSheet("Sheet1");
+
+  assert.deepEqual(reopenedSheet.getComments(), [
+    { address: "A1", author: "Alice", text: "Header" },
+    { address: "B4", author: "Bob", text: "Body" },
+  ]);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Row>3<\/x:Row>/);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Column>1<\/x:Column>/);
+});
+
+test("insertColumn shifts worksheet comments right and preserves blank-cell comments after reload", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("A1", "Left", { author: "Alice" });
+  sheet.setComment("C3", "Shifted", { author: "Bob" });
+
+  sheet.insertColumn("B");
+
+  const reopened = Workbook.fromEntries(workbook.toEntries());
+  const reopenedSheet = reopened.getSheet("Sheet1");
+
+  assert.deepEqual(reopenedSheet.getComments(), [
+    { address: "A1", author: "Alice", text: "Left" },
+    { address: "D3", author: "Bob", text: "Shifted" },
+  ]);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Row>2<\/x:Row>/);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Column>3<\/x:Column>/);
+});
+
+test("deleteRow removes in-band worksheet comments and shifts trailing comments after reload", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("A1", "Keep", { author: "Alice" });
+  sheet.setComment("B2", "Drop", { author: "Bob" });
+  sheet.setComment("C4", "Shift", { author: "Cara" });
+
+  sheet.deleteRow(2, 2);
+
+  const reopened = Workbook.fromEntries(workbook.toEntries());
+  const reopenedSheet = reopened.getSheet("Sheet1");
+
+  assert.deepEqual(reopenedSheet.getComments(), [
+    { address: "A1", author: "Alice", text: "Keep" },
+    { address: "C2", author: "Cara", text: "Shift" },
+  ]);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Row>1<\/x:Row>/);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Column>2<\/x:Column>/);
+});
+
+test("deleteColumn removes in-band worksheet comments and shifts trailing comments after reload", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("A1", "Keep", { author: "Alice" });
+  sheet.setComment("B2", "Drop", { author: "Bob" });
+  sheet.setComment("D4", "Shift", { author: "Cara" });
+
+  sheet.deleteColumn("B", 2);
+
+  const reopened = Workbook.fromEntries(workbook.toEntries());
+  const reopenedSheet = reopened.getSheet("Sheet1");
+
+  assert.deepEqual(reopenedSheet.getComments(), [
+    { address: "A1", author: "Alice", text: "Keep" },
+    { address: "B4", author: "Cara", text: "Shift" },
+  ]);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Row>3<\/x:Row>/);
+  assert.match(entryText(reopened.toEntries(), "xl/drawings/vmlDrawing1.vml"), /<x:Column>1<\/x:Column>/);
+});
+
 test("sheet autoFilter definition reads supported columns and sort state", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(
@@ -5712,6 +5839,27 @@ test("sheet sortRange reorders rows and moves linked metadata with the sorted re
     },
   });
   assert.equal(sheet.getTable("Scores").range, "A1:D4");
+});
+
+test("sheet sortRange keeps worksheet comments explicitly unsupported", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setRange("A1", [
+    ["Name", "Score"],
+    ["Beta", 2],
+    ["Alpha", 5],
+  ]);
+  sheet.setComment("A2", "Note", { author: "Alice" });
+
+  assert.throws(
+    () =>
+      sheet.sortRange("A1:B3", {
+        conditions: [{ columnNumber: 2, descending: true }],
+        hasHeaderRow: true,
+      }),
+    /sortRange does not yet support worksheet comments inside A1:B3/,
+  );
 });
 
 test("sheet sortRange supports multi-column sorting", () => {

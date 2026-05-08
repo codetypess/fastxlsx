@@ -3,6 +3,7 @@ import type {
   AutoFilterCondition,
   AutoFilterDefinition,
   CellEntry,
+  SheetComment,
   CellStyleAlignment,
   CellSnapshot,
   DateGroupItem,
@@ -25,6 +26,7 @@ import {
 } from "../sheet/sheet-index.js";
 import { parseMergedRanges } from "../sheet/sheet-merge.js";
 import { formatRangeRef, numberToColumnLabel, parseRangeRef } from "../sheet/sheet-address.js";
+import { calculateCommentBounds, filterCommentsInWindow } from "../sheet/sheet-comments.js";
 import { parseSheetFreezePane } from "../sheet/sheet-view-metadata.js";
 import { parseWorksheetAutoFilterDefinition } from "../sheet/sheet-auto-filter.js";
 import {
@@ -51,6 +53,7 @@ interface SharedFormulaAnchor {
 interface SheetReadCache {
   autoFilter: AutoFilterDefinition | null;
   columnDefinitions: ColumnWindowDefinition[];
+  comments: SheetComment[];
   freezePane: FreezePane | null;
   mergedRanges: WindowRange[];
   rowInfos: SheetRowReadInfo[];
@@ -220,6 +223,7 @@ export function readWorkbookSheetWindow(
     cellAlignments: cellResult.cellAlignments,
     cells: cellResult.cells,
     clampedRange: formatRangeRef(clampedStartRow, clampedStartColumn, clampedEndRow, clampedEndColumn),
+    comments: filterCommentsInWindow(cache.comments, clampedStartRow, clampedEndRow, clampedStartColumn, clampedEndColumn),
     columnAlignments: columnMetadata.columnAlignments,
     columnCount,
     columnStyleIds: columnMetadata.columnStyleIds,
@@ -251,6 +255,7 @@ function getOrCreateReadState(workbook: Workbook): ReadState {
 
 function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
   const sheetXml = workbook.readEntryText(sheet.path);
+  const comments = sheet.getComments();
   const sharedFormulaAnchors = new Map<string, SharedFormulaAnchor>();
   const rowInfos: SheetRowReadInfo[] = [];
   const { sheetDataInnerEnd, sheetDataInnerStart } = locateSheetData(sheetXml);
@@ -314,6 +319,7 @@ function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
       styleId: parseColumnDefinitionStyleId(definition.attributes),
       width: parseColumnDefinitionWidth(definition.attributes),
     })),
+    comments,
     freezePane: parseSheetFreezePane(sheetXml),
     mergedRanges: parseMergedRanges(sheetXml).map((ref) => {
       const parsed = parseRangeRef(ref);
@@ -328,7 +334,7 @@ function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
     rowInfos,
     sheetXml,
     sharedFormulaAnchors,
-    usedBounds: calculateUsedBounds(rowInfos),
+    usedBounds: mergeUsedBounds(calculateUsedBounds(rowInfos), calculateCommentBounds(comments)),
   };
 }
 
@@ -545,6 +551,22 @@ function calculateUsedBounds(rowInfos: SheetRowReadInfo[]): UsedBounds | null {
         minRow,
       }
     : null;
+}
+
+function mergeUsedBounds(left: UsedBounds | null, right: UsedBounds | null): UsedBounds | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return {
+    maxColumn: Math.max(left.maxColumn, right.maxColumn),
+    maxRow: Math.max(left.maxRow, right.maxRow),
+    minColumn: Math.min(left.minColumn, right.minColumn),
+    minRow: Math.min(left.minRow, right.minRow),
+  };
 }
 
 function collectRowWindowMetadata(
@@ -775,6 +797,7 @@ function buildEmptyWindowSnapshot(
     cellAlignments: {},
     cells: [],
     clampedRange: null,
+    comments: [],
     columnAlignments: {},
     columnCount,
     columnStyleIds: {},

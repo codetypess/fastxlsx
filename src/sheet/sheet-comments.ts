@@ -3,7 +3,7 @@ import { XlsxError } from "../errors.js";
 import { basenamePosix, dirnamePosix, resolveRelationshipTarget } from "../utils/path.js";
 import { decodeXmlText, escapeRegex, escapeXmlText, parseAttributes, serializeAttributes } from "../utils/xml.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
-import { compareCellAddresses, normalizeCellAddress, splitCellAddress } from "./sheet-address.js";
+import { compareCellAddresses, makeCellAddress, normalizeCellAddress, splitCellAddress } from "./sheet-address.js";
 import { buildSelfClosingXmlElement, findWorksheetChildInsertionIndex, replaceXmlTagSource } from "./sheet-xml.js";
 
 export const COMMENTS_CONTENT_TYPE =
@@ -36,6 +36,13 @@ export interface SheetCommentParts {
   legacyDrawingRelationshipId: string | null;
   vmlPath: string | null;
   vmlRelationshipId: string | null;
+}
+
+export interface CommentBounds {
+  maxColumn: number;
+  maxRow: number;
+  minColumn: number;
+  minRow: number;
 }
 
 export function parseCommentsXml(commentsXml: string): ParsedComments {
@@ -235,6 +242,83 @@ export function getNextVmlDrawingPath(entryPaths: string[]): string {
   return `xl/drawings/vmlDrawing${nextIndex}.vml`;
 }
 
+export function calculateCommentBounds(comments: SheetComment[]): CommentBounds | null {
+  if (comments.length === 0) {
+    return null;
+  }
+
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = 0;
+  let minColumn = Number.POSITIVE_INFINITY;
+  let maxColumn = 0;
+
+  for (const comment of comments) {
+    const { rowNumber, columnNumber } = splitCellAddress(comment.address);
+    minRow = Math.min(minRow, rowNumber);
+    maxRow = Math.max(maxRow, rowNumber);
+    minColumn = Math.min(minColumn, columnNumber);
+    maxColumn = Math.max(maxColumn, columnNumber);
+  }
+
+  return { maxColumn, maxRow, minColumn, minRow };
+}
+
+export function filterCommentsInWindow(
+  comments: SheetComment[],
+  startRow: number,
+  endRow: number,
+  startColumn: number,
+  endColumn: number,
+): SheetComment[] {
+  return comments.filter((comment) => {
+    const { rowNumber, columnNumber } = splitCellAddress(comment.address);
+    return rowNumber >= startRow && rowNumber <= endRow && columnNumber >= startColumn && columnNumber <= endColumn;
+  });
+}
+
+export function shiftWorksheetComments(
+  comments: SheetComment[],
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): SheetComment[] {
+  return comments.map((comment) => {
+    const { rowNumber, columnNumber } = splitCellAddress(comment.address);
+    return {
+      ...comment,
+      address: makeCellAddress(
+        shiftRowNumber(rowNumber, targetRowNumber, rowCount),
+        shiftColumnNumber(columnNumber, targetColumnNumber, columnCount),
+      ),
+    };
+  });
+}
+
+export function deleteWorksheetComments(
+  comments: SheetComment[],
+  targetColumnNumber: number,
+  columnCount: number,
+  targetRowNumber: number,
+  rowCount: number,
+): SheetComment[] {
+  return comments
+    .filter((comment) => {
+      const { rowNumber, columnNumber } = splitCellAddress(comment.address);
+      return !isRowDeleted(rowNumber, targetRowNumber, rowCount) && !isColumnDeleted(columnNumber, targetColumnNumber, columnCount);
+    })
+    .map((comment) => {
+      const { rowNumber, columnNumber } = splitCellAddress(comment.address);
+      return {
+        ...comment,
+        address: makeCellAddress(
+          deleteShiftRowNumber(rowNumber, targetRowNumber, rowCount),
+          deleteShiftColumnNumber(columnNumber, targetColumnNumber, columnCount),
+        ),
+      };
+    });
+}
+
 function parseCommentText(textXml: string): string {
   const runs = findXmlTags(textXml, "t");
   if (runs.length === 0) {
@@ -275,4 +359,52 @@ function findRelationshipById(
   }
 
   return null;
+}
+
+function shiftColumnNumber(columnNumber: number, targetColumnNumber: number, count: number): number {
+  if (targetColumnNumber <= 0 || count <= 0) {
+    return columnNumber;
+  }
+
+  return columnNumber >= targetColumnNumber ? columnNumber + count : columnNumber;
+}
+
+function shiftRowNumber(rowNumber: number, targetRowNumber: number, count: number): number {
+  if (targetRowNumber <= 0 || count <= 0) {
+    return rowNumber;
+  }
+
+  return rowNumber >= targetRowNumber ? rowNumber + count : rowNumber;
+}
+
+function deleteShiftColumnNumber(columnNumber: number, targetColumnNumber: number, count: number): number {
+  if (targetColumnNumber <= 0 || count <= 0) {
+    return columnNumber;
+  }
+
+  return columnNumber < targetColumnNumber ? columnNumber : columnNumber - count;
+}
+
+function deleteShiftRowNumber(rowNumber: number, targetRowNumber: number, count: number): number {
+  if (targetRowNumber <= 0 || count <= 0) {
+    return rowNumber;
+  }
+
+  return rowNumber < targetRowNumber ? rowNumber : rowNumber - count;
+}
+
+function isColumnDeleted(columnNumber: number, targetColumnNumber: number, count: number): boolean {
+  if (targetColumnNumber <= 0 || count <= 0) {
+    return false;
+  }
+
+  return columnNumber >= targetColumnNumber && columnNumber < targetColumnNumber + count;
+}
+
+function isRowDeleted(rowNumber: number, targetRowNumber: number, count: number): boolean {
+  if (targetRowNumber <= 0 || count <= 0) {
+    return false;
+  }
+
+  return rowNumber >= targetRowNumber && rowNumber < targetRowNumber + count;
 }

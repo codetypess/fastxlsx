@@ -418,6 +418,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `sheet.getTables()`
 - `sheet.getComments()`
 - `sheet.getComment(address)`
+- `sheet.getCommentsInRange(range)`
 - `sheet.getHyperlink(address)`
 - `sheet.hyperlink(address)`
 - `sheet.getHyperlinks()`
@@ -645,6 +646,8 @@ Notes:
 - `sheet.getHyperlinks()` currently reads internal and external hyperlinks from the sheet; external link targets are resolved through the sheet relationships part.
 - `sheet.getAutoFilter()`, `sheet.setAutoFilter()`, and `sheet.removeAutoFilter()` currently manage the worksheet-level `autoFilter`; removing it also clears the top-level `sortState`.
 - `sheet.getDataValidations()`, `sheet.setDataValidation()`, and `sheet.removeDataValidation()` currently manage worksheet-level `dataValidations`, including common attributes plus `formula1` and `formula2`, and keep `sqref` updated during row and column edits.
+- `sheet.getCommentsInRange()` returns bounded worksheet comments, and `sheet.readWindow()` / `workbook.readSheetWindow()` now expose a separate `window.comments` collection so blank-cell comments do not need synthetic sparse cells.
+- Worksheet comments now participate in `insertRow()`, `insertColumn()`, `deleteRow()`, and `deleteColumn()`. Addresses shift or drop with the edited rows or columns, and the backing comments XML plus VML drawing stay aligned after save and reload.
 - `sheet.addTable()` currently creates the basic table part, sheet relationship, `[Content_Types].xml` override, and table XML. Column names default to the first row in the range, and blank names fall back to `ColumnN`.
 - `sheet.removeTable()` currently removes the current sheet's `tableParts`, sheet relationship, table XML, and matching content type override.
 - Existing linked tables keep their own `ref` and `autoFilter` updated during row and column insert/delete operations. If a table becomes empty, its `tableParts` entry is removed from the sheet.

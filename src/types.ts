@@ -356,6 +356,7 @@ export interface SheetWindowSnapshot {
   rowCount: number;
   columnCount: number;
   cells: SheetWindowCell[];
+  comments: SheetComment[];
   cellAlignments: Record<string, CellStyleAlignment>;
   rowAlignments: Record<string, CellStyleAlignment>;
   columnAlignments: Record<string, CellStyleAlignment>;
