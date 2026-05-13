@@ -38,6 +38,7 @@ import type {
   SheetValueWindowSnapshot,
   SheetWindowColumnEntry,
   SheetWindowCell,
+  SheetWindowReadSettings,
   SheetWindowReadOptions,
   SheetWindowRowEntry,
   SheetWindowSnapshot,
@@ -1549,8 +1550,18 @@ export class Sheet {
   /**
    * Reads a sparse worksheet window plus related layout metadata.
    */
-  readWindow(options: SheetWindowReadOptions): SheetWindowSnapshot {
+  readWindow(options: SheetWindowReadOptions): SheetWindowSnapshot;
+  readWindow(options: SheetWindowReadOptions, settings: { mode?: "full" }): SheetWindowSnapshot;
+  readWindow(options: SheetWindowReadOptions, settings: { mode: "value" }): SheetValueWindowSnapshot;
+  readWindow(
+    options: SheetWindowReadOptions,
+    settings?: SheetWindowReadSettings,
+  ): SheetWindowSnapshot | SheetValueWindowSnapshot {
     this.ensureReadableState();
+    if (settings?.mode === "value") {
+      return readWorkbookSheetValueWindow(this.workbook, this, options);
+    }
+
     return readWorkbookSheetWindow(this.workbook, this, options);
   }
 
@@ -1558,8 +1569,7 @@ export class Sheet {
    * Reads a sparse worksheet value window without layout metadata.
    */
   readValueWindow(options: SheetWindowReadOptions): SheetValueWindowSnapshot {
-    this.ensureReadableState();
-    return readWorkbookSheetValueWindow(this.workbook, this, options);
+    return this.readWindow(options, { mode: "value" });
   }
 
   /**

@@ -10,5 +10,6 @@ Current specs:
 - [auto-filter-checklist.md](auto-filter-checklist.md)
 - [fastxlsx-load-performance.md](fastxlsx-load-performance.md)
 - [fastxlsx-sheet-layout-get-defaults.md](fastxlsx-sheet-layout-get-defaults.md)
+- [fastxlsx-window-read-modes.md](fastxlsx-window-read-modes.md)
 - [fastxlsx-value-window-read.md](fastxlsx-value-window-read.md)
 - [fastxlsx-worksheet-comments.md](fastxlsx-worksheet-comments.md)

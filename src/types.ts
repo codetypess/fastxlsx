@@ -327,6 +327,12 @@ export interface SheetWindowReadOptions {
   endColumn: number;
 }
 
+export type SheetWindowReadMode = "full" | "value";
+
+export interface SheetWindowReadSettings {
+  mode?: SheetWindowReadMode;
+}
+
 export interface SheetValueWindowCell {
   address: string;
   rowNumber: number;

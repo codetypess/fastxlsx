@@ -406,6 +406,31 @@ test("sheet value windows read sparse values without layout metadata", () => {
     }),
     window,
   );
+  assert.deepEqual(
+    sheet.readWindow(
+      {
+        startColumn: 1,
+        startRow: 1,
+        endColumn: 5,
+        endRow: 5,
+      },
+      { mode: "value" },
+    ),
+    window,
+  );
+  assert.deepEqual(
+    workbook.readSheetWindow(
+      "Sheet1",
+      {
+        startColumn: 1,
+        startRow: 1,
+        endColumn: 5,
+        endRow: 5,
+      },
+      { mode: "value" },
+    ),
+    window,
+  );
 });
 
 test("sheet value windows ignore comment-only bounds", () => {
@@ -426,6 +451,30 @@ test("sheet value windows ignore comment-only bounds", () => {
   assert.equal(window.rowCount, 0);
   assert.equal(window.columnCount, 0);
   assert.deepEqual(window.cells, []);
+
+  const unifiedValueWindow = sheet.readWindow(
+    {
+      startColumn: 4,
+      startRow: 5,
+      endColumn: 4,
+      endRow: 5,
+    },
+    { mode: "value" },
+  );
+  assert.deepEqual(unifiedValueWindow, window);
+
+  const fullWindow = sheet.readWindow({
+    startColumn: 4,
+    startRow: 5,
+    endColumn: 4,
+    endRow: 5,
+  });
+  assert.equal(fullWindow.sheetRange, "D5");
+  assert.equal(fullWindow.clampedRange, "D5");
+  assert.equal(fullWindow.rowCount, 5);
+  assert.equal(fullWindow.columnCount, 4);
+  assert.deepEqual(fullWindow.cells, []);
+  assert.deepEqual(fullWindow.comments, [{ address: "D5", author: "Alice", text: "Only note" }]);
 });
 
 test("sheet value windows refresh after writes and structural edits", () => {

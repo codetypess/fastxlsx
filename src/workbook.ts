@@ -25,6 +25,7 @@ import type {
   RecalculateSummary,
   SetDefinedNameOptions,
   SheetValueWindowSnapshot,
+  SheetWindowReadSettings,
   SheetWindowReadOptions,
   SheetWindowSnapshot,
   SheetVisibility,
@@ -496,8 +497,28 @@ export class Workbook {
   /**
    * Reads a sparse worksheet window plus related layout metadata.
    */
-  readSheetWindow(sheetName: string, options: SheetWindowReadOptions): SheetWindowSnapshot {
-    return this.getSheet(sheetName).readWindow(options);
+  readSheetWindow(sheetName: string, options: SheetWindowReadOptions): SheetWindowSnapshot;
+  readSheetWindow(
+    sheetName: string,
+    options: SheetWindowReadOptions,
+    settings: { mode?: "full" },
+  ): SheetWindowSnapshot;
+  readSheetWindow(
+    sheetName: string,
+    options: SheetWindowReadOptions,
+    settings: { mode: "value" },
+  ): SheetValueWindowSnapshot;
+  readSheetWindow(
+    sheetName: string,
+    options: SheetWindowReadOptions,
+    settings?: SheetWindowReadSettings,
+  ): SheetWindowSnapshot | SheetValueWindowSnapshot {
+    const sheet = this.getSheet(sheetName);
+    if (settings?.mode === "value") {
+      return sheet.readWindow(options, { mode: "value" });
+    }
+
+    return sheet.readWindow(options);
   }
 
   /**

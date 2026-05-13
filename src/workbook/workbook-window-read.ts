@@ -44,8 +44,8 @@ import { parseAttributes, serializeAttributes, getXmlAttr } from "../utils/xml.j
 
 interface ReadState {
   manifest?: WorkbookManifest;
-  sheetCaches: Map<string, SheetReadCache>;
-  valueSheetCaches: Map<string, ValueSheetReadCache>;
+  baseSheetCaches: Map<string, BaseSheetReadCache>;
+  fullSheetCaches: Map<string, SheetReadCache>;
 }
 
 interface SharedFormulaAnchor {
@@ -55,18 +55,17 @@ interface SharedFormulaAnchor {
 }
 
 interface SheetReadCache {
+  base: BaseSheetReadCache;
   autoFilter: AutoFilterDefinition | null;
   columnDefinitions: ColumnWindowDefinition[];
   comments: SheetComment[];
   freezePane: FreezePane | null;
   mergedRanges: WindowRange[];
-  rowInfos: SheetRowReadInfo[];
-  sheetXml: string;
   sharedFormulaAnchors: Map<string, SharedFormulaAnchor>;
   usedBounds: UsedBounds | null;
 }
 
-interface ValueSheetReadCache {
+interface BaseSheetReadCache {
   rowInfos: SheetRowReadInfo[];
   sheetXml: string;
   usedBounds: UsedBounds | null;
@@ -177,12 +176,7 @@ export function readWorkbookSheetWindow(
 ): SheetWindowSnapshot {
   assertSheetWindowReadOptions(options);
 
-  const state = getOrCreateReadState(workbook);
-  let cache = state.sheetCaches.get(sheet.path);
-  if (!cache) {
-    cache = buildSheetReadCache(workbook, sheet);
-    state.sheetCaches.set(sheet.path, cache);
-  }
+  const cache = resolveFullSheetReadCache(workbook, sheet);
 
   const requestedRange = formatRangeRef(options.startRow, options.startColumn, options.endRow, options.endColumn);
   const rowCount = cache.usedBounds?.maxRow ?? 0;
@@ -215,7 +209,7 @@ export function readWorkbookSheetWindow(
   const alignmentCache = new Map<number, CellStyleAlignment | null>();
   const rowMetadata = collectRowWindowMetadata(
     workbook,
-    cache.rowInfos,
+    cache.base.rowInfos,
     clampedStartRow,
     clampedEndRow,
     alignmentCache,
@@ -270,12 +264,7 @@ export function readWorkbookSheetValueWindow(
 ): SheetValueWindowSnapshot {
   assertSheetWindowReadOptions(options);
 
-  const state = getOrCreateReadState(workbook);
-  let cache = state.valueSheetCaches.get(sheet.path);
-  if (!cache) {
-    cache = buildSheetValueReadCache(workbook, sheet);
-    state.valueSheetCaches.set(sheet.path, cache);
-  }
+  const cache = resolveBaseSheetReadCache(workbook, sheet);
 
   const requestedRange = formatRangeRef(options.startRow, options.startColumn, options.endRow, options.endColumn);
   const rowCount = cache.usedBounds?.maxRow ?? 0;
@@ -328,15 +317,90 @@ export function readWorkbookSheetValueWindow(
 function getOrCreateReadState(workbook: Workbook): ReadState {
   let state = readStates.get(workbook);
   if (!state) {
-    state = { sheetCaches: new Map(), valueSheetCaches: new Map() };
+    state = { baseSheetCaches: new Map(), fullSheetCaches: new Map() };
     readStates.set(workbook, state);
   }
   return state;
 }
 
-function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
-  const sheetXml = workbook.readEntryText(sheet.path);
+function resolveBaseSheetReadCache(workbook: Workbook, sheet: Sheet): BaseSheetReadCache {
+  const state = getOrCreateReadState(workbook);
+  let cache = state.baseSheetCaches.get(sheet.path);
+  if (!cache) {
+    cache = buildBaseSheetReadCache(workbook, sheet).base;
+    state.baseSheetCaches.set(sheet.path, cache);
+  }
+
+  return cache;
+}
+
+function resolveFullSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
+  const state = getOrCreateReadState(workbook);
+  let cache = state.fullSheetCaches.get(sheet.path);
+  if (cache) {
+    return cache;
+  }
+
+  let baseCache = state.baseSheetCaches.get(sheet.path);
+  let sharedFormulaAnchors: Map<string, SharedFormulaAnchor>;
+  if (!baseCache) {
+    const built = buildBaseSheetReadCache(workbook, sheet, { collectSharedFormulaAnchors: true });
+    baseCache = built.base;
+    sharedFormulaAnchors = built.sharedFormulaAnchors;
+    state.baseSheetCaches.set(sheet.path, baseCache);
+  } else {
+    sharedFormulaAnchors = collectSharedFormulaAnchors(workbook, baseCache);
+  }
+
+  cache = buildFullSheetReadCache(sheet, baseCache, sharedFormulaAnchors);
+  state.fullSheetCaches.set(sheet.path, cache);
+  return cache;
+}
+
+function buildFullSheetReadCache(
+  sheet: Sheet,
+  base: BaseSheetReadCache,
+  sharedFormulaAnchors: Map<string, SharedFormulaAnchor>,
+): SheetReadCache {
+  const sheetXml = base.sheetXml;
   const comments = sheet.getComments();
+
+  return {
+    base,
+    autoFilter: parseWorksheetAutoFilterDefinition(sheetXml),
+    columnDefinitions: parseColumnDefinitions(sheetXml).map((definition) => ({
+      hidden: parseColumnDefinitionHidden(definition.attributes),
+      max: definition.max,
+      min: definition.min,
+      styleId: parseColumnDefinitionStyleId(definition.attributes),
+      width: parseColumnDefinitionWidth(definition.attributes),
+    })),
+    comments,
+    freezePane: parseSheetFreezePane(sheetXml),
+    mergedRanges: parseMergedRanges(sheetXml).map((ref) => {
+      const parsed = parseRangeRef(ref);
+      return {
+        endColumn: parsed.endColumn,
+        endRow: parsed.endRow,
+        ref,
+        startColumn: parsed.startColumn,
+        startRow: parsed.startRow,
+      };
+    }),
+    sharedFormulaAnchors,
+    usedBounds: mergeUsedBounds(base.usedBounds, calculateCommentBounds(comments)),
+  };
+}
+
+function buildBaseSheetReadCache(
+  workbook: Workbook,
+  sheet: Sheet,
+  options: { collectSharedFormulaAnchors?: boolean } = {},
+): {
+  base: BaseSheetReadCache;
+  sharedFormulaAnchors: Map<string, SharedFormulaAnchor>;
+} {
+  const sheetXml = workbook.readEntryText(sheet.path);
   const sharedFormulaAnchors = new Map<string, SharedFormulaAnchor>();
   const rowInfos: SheetRowReadInfo[] = [];
   const { sheetDataInnerEnd, sheetDataInnerStart } = locateSheetData(sheetXml);
@@ -368,16 +432,25 @@ function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
     const innerStart = rowMetadata.selfClosing ? rowEnd : rowOpenTagEnd + 1;
     const innerEnd = rowMetadata.selfClosing ? rowEnd : rowEnd;
     rowInfos.push(
-      buildSheetRowReadInfo(
-        workbook,
-        sheetXml,
-        innerStart,
-        innerEnd,
-        rowMetadata.attributesSource,
-        rowMetadata.selfClosing,
-        rowNumber,
-        sharedFormulaAnchors,
-      ),
+      options.collectSharedFormulaAnchors
+        ? buildSheetRowReadInfo(
+            workbook,
+            sheetXml,
+            innerStart,
+            innerEnd,
+            rowMetadata.attributesSource,
+            rowMetadata.selfClosing,
+            rowNumber,
+            sharedFormulaAnchors,
+          )
+        : buildBaseSheetRowReadInfo(
+            sheetXml,
+            innerStart,
+            innerEnd,
+            rowMetadata.attributesSource,
+            rowMetadata.selfClosing,
+            rowNumber,
+          ),
     );
 
     if (rowNumber < previousRowNumber) {
@@ -392,89 +465,12 @@ function buildSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadCache {
   }
 
   return {
-    autoFilter: parseWorksheetAutoFilterDefinition(sheetXml),
-    columnDefinitions: parseColumnDefinitions(sheetXml).map((definition) => ({
-      hidden: parseColumnDefinitionHidden(definition.attributes),
-      max: definition.max,
-      min: definition.min,
-      styleId: parseColumnDefinitionStyleId(definition.attributes),
-      width: parseColumnDefinitionWidth(definition.attributes),
-    })),
-    comments,
-    freezePane: parseSheetFreezePane(sheetXml),
-    mergedRanges: parseMergedRanges(sheetXml).map((ref) => {
-      const parsed = parseRangeRef(ref);
-      return {
-        endColumn: parsed.endColumn,
-        endRow: parsed.endRow,
-        ref,
-        startColumn: parsed.startColumn,
-        startRow: parsed.startRow,
-      };
-    }),
-    rowInfos,
-    sheetXml,
+    base: {
+      rowInfos,
+      sheetXml,
+      usedBounds: calculateUsedBounds(rowInfos),
+    },
     sharedFormulaAnchors,
-    usedBounds: mergeUsedBounds(calculateUsedBounds(rowInfos), calculateCommentBounds(comments)),
-  };
-}
-
-function buildSheetValueReadCache(workbook: Workbook, sheet: Sheet): ValueSheetReadCache {
-  const sheetXml = workbook.readEntryText(sheet.path);
-  const rowInfos: SheetRowReadInfo[] = [];
-  const { sheetDataInnerEnd, sheetDataInnerStart } = locateSheetData(sheetXml);
-  let cursor = sheetDataInnerStart;
-  let previousRowNumber = 0;
-  let rowsAreSorted = true;
-
-  while (cursor < sheetDataInnerEnd) {
-    const rowStart = sheetXml.indexOf("<row", cursor);
-    if (rowStart === -1 || rowStart >= sheetDataInnerEnd) {
-      break;
-    }
-
-    const rowOpenTagEnd = sheetXml.indexOf(">", rowStart + 4);
-    if (rowOpenTagEnd === -1 || rowOpenTagEnd >= sheetDataInnerEnd) {
-      break;
-    }
-
-    const rowMetadata = parseRowTagMetadata(sheetXml.slice(rowStart + 4, rowOpenTagEnd));
-    const rowEnd = rowMetadata.selfClosing
-      ? rowOpenTagEnd + 1
-      : sheetXml.indexOf("</row>", rowOpenTagEnd + 1);
-    if (!rowMetadata.rowNumberText || rowEnd === -1) {
-      cursor = rowOpenTagEnd + 1;
-      continue;
-    }
-
-    const rowNumber = Number(rowMetadata.rowNumberText);
-    const innerStart = rowMetadata.selfClosing ? rowEnd : rowOpenTagEnd + 1;
-    const innerEnd = rowMetadata.selfClosing ? rowEnd : rowEnd;
-    rowInfos.push(
-      buildValueSheetRowReadInfo(
-        sheetXml,
-        innerStart,
-        innerEnd,
-        rowMetadata.selfClosing,
-        rowNumber,
-      ),
-    );
-
-    if (rowNumber < previousRowNumber) {
-      rowsAreSorted = false;
-    }
-    previousRowNumber = rowNumber;
-    cursor = rowMetadata.selfClosing ? rowEnd : rowEnd + "</row>".length;
-  }
-
-  if (!rowsAreSorted) {
-    rowInfos.sort((left, right) => left.rowNumber - right.rowNumber);
-  }
-
-  return {
-    rowInfos,
-    sheetXml,
-    usedBounds: calculateUsedBounds(rowInfos),
   };
 }
 
@@ -496,16 +492,17 @@ function locateSheetData(sheetXml: string): { sheetDataInnerEnd: number; sheetDa
   };
 }
 
-function buildValueSheetRowReadInfo(
+function buildBaseSheetRowReadInfo(
   sheetXml: string,
   innerStart: number,
   innerEnd: number,
+  attributesSource: string,
   selfClosing: boolean,
   rowNumber: number,
 ): SheetRowReadInfo {
   if (selfClosing) {
     return {
-      attributesSource: "",
+      attributesSource,
       innerEnd,
       innerStart,
       maxColumnNumber: 0,
@@ -564,7 +561,7 @@ function buildValueSheetRowReadInfo(
 
   const analysis = analyzeValueScratchCells(scratchCells);
   return {
-    attributesSource: "",
+    attributesSource,
     innerEnd,
     innerStart,
     maxColumnNumber: analysis.maxColumnNumber,
@@ -787,6 +784,58 @@ function mergeUsedBounds(left: UsedBounds | null, right: UsedBounds | null): Use
   };
 }
 
+function collectSharedFormulaAnchors(
+  workbook: Workbook,
+  base: BaseSheetReadCache,
+): Map<string, SharedFormulaAnchor> {
+  const sharedFormulaAnchors = new Map<string, SharedFormulaAnchor>();
+
+  for (const rowInfo of base.rowInfos) {
+    let cellCursor = rowInfo.innerStart;
+    while (cellCursor < rowInfo.innerEnd) {
+      const cellStart = base.sheetXml.indexOf("<c", cellCursor);
+      if (cellStart === -1 || cellStart >= rowInfo.innerEnd) {
+        break;
+      }
+
+      const cellOpenTagEnd = base.sheetXml.indexOf(">", cellStart + 2);
+      if (cellOpenTagEnd === -1 || cellOpenTagEnd > rowInfo.innerEnd) {
+        break;
+      }
+
+      const cellMetadata = parseCellTagMetadata(base.sheetXml.slice(cellStart + 2, cellOpenTagEnd));
+      const cellEnd = cellMetadata.selfClosing
+        ? cellOpenTagEnd + 1
+        : base.sheetXml.indexOf("</c>", cellOpenTagEnd + 1);
+      if (!cellMetadata.addressSource || cellEnd === -1) {
+        cellCursor = cellOpenTagEnd + 1;
+        continue;
+      }
+
+      const { columnNumber } = parseCellAddressFast(cellMetadata.addressSource.toUpperCase());
+      const snapshotResult = buildCellSnapshot(
+        workbook,
+        cellMetadata.rawType,
+        cellMetadata.styleIdText === undefined ? null : Number(cellMetadata.styleIdText),
+        base.sheetXml,
+        cellMetadata.selfClosing ? cellEnd : cellOpenTagEnd + 1,
+        cellMetadata.selfClosing ? cellEnd : cellEnd,
+      );
+      registerSharedFormulaAnchor(
+        snapshotResult.formulaAttributesSource,
+        snapshotResult.snapshot,
+        rowInfo.rowNumber,
+        columnNumber,
+        sharedFormulaAnchors,
+      );
+
+      cellCursor = cellMetadata.selfClosing ? cellEnd : cellEnd + "</c>".length;
+    }
+  }
+
+  return sharedFormulaAnchors;
+}
+
 function collectRowWindowMetadata(
   workbook: Workbook,
   rowInfos: SheetRowReadInfo[],
@@ -886,8 +935,9 @@ function readWindowCells(
 ): CellWindowReadResult {
   const cellAlignments: Record<string, CellStyleAlignment> = {};
   const cells: SheetWindowCell[] = [];
+  const base = cache.base;
 
-  for (const rowInfo of cache.rowInfos) {
+  for (const rowInfo of base.rowInfos) {
     if (rowInfo.rowNumber < startRow) {
       continue;
     }
@@ -897,20 +947,20 @@ function readWindowCells(
 
     let cellCursor = rowInfo.innerStart;
     while (cellCursor < rowInfo.innerEnd) {
-      const cellStart = cache.sheetXml.indexOf("<c", cellCursor);
+      const cellStart = base.sheetXml.indexOf("<c", cellCursor);
       if (cellStart === -1 || cellStart >= rowInfo.innerEnd) {
         break;
       }
 
-      const cellOpenTagEnd = cache.sheetXml.indexOf(">", cellStart + 2);
+      const cellOpenTagEnd = base.sheetXml.indexOf(">", cellStart + 2);
       if (cellOpenTagEnd === -1 || cellOpenTagEnd > rowInfo.innerEnd) {
         break;
       }
 
-      const cellMetadata = parseCellTagMetadata(cache.sheetXml.slice(cellStart + 2, cellOpenTagEnd));
+      const cellMetadata = parseCellTagMetadata(base.sheetXml.slice(cellStart + 2, cellOpenTagEnd));
       const cellEnd = cellMetadata.selfClosing
         ? cellOpenTagEnd + 1
-        : cache.sheetXml.indexOf("</c>", cellOpenTagEnd + 1);
+        : base.sheetXml.indexOf("</c>", cellOpenTagEnd + 1);
       if (!cellMetadata.addressSource || cellEnd === -1) {
         cellCursor = cellOpenTagEnd + 1;
         continue;
@@ -927,7 +977,7 @@ function readWindowCells(
         workbook,
         cellMetadata.rawType,
         cellMetadata.styleIdText === undefined ? null : Number(cellMetadata.styleIdText),
-        cache.sheetXml,
+        base.sheetXml,
         cellMetadata.selfClosing ? cellEnd : cellOpenTagEnd + 1,
         cellMetadata.selfClosing ? cellEnd : cellEnd,
       );
@@ -967,7 +1017,7 @@ function readWindowCells(
 
 function readValueWindowCells(
   workbook: Workbook,
-  cache: ValueSheetReadCache,
+  cache: BaseSheetReadCache,
   startRow: number,
   endRow: number,
   startColumn: number,
