@@ -590,6 +590,7 @@ await workbook.save("output.xlsx");
 - 后续 `getCell` / `getFormula` 会直接走索引查找，不再每次整张表做字符串匹配
 - `sheet.rowCount` / `sheet.columnCount` 表示逻辑 used range 的最大行号 / 最大列号，只统计当前带值或公式的单元格；纯空白占位的 `<c>` 节点和只包含空白占位单元格的物理行都不会扩展 used range。空表返回 `0`
 - `sheet.getCellEntries()` / `iterCellEntries()` / `getRowEntries()` / `getColumnEntries()` / `getRangeRef()` 是默认的逻辑读取 API，会跳过既没有值也没有公式的空白占位 `<c>` 节点，并按逻辑 used bounds 工作
+- `sheet.readValueWindow()` / `sheet.iterValueWindowCells()` / `workbook.readSheetValueWindow()` 提供更轻量的稀疏 value window 读取接口，只返回坐标和缓存值；公式单元格即使缓存值是 `null` 也会保留，但结果里不会包含样式、显示值、批注、合并区或其它布局元数据
 - `sheet.getPhysicalCellEntries()` / `iterPhysicalCellEntries()` / `getPhysicalRowEntries()` / `getPhysicalColumnEntries()` / `getPhysicalRangeRef()` 用来读取精确的物理 `<c>` 节点边界，适合排查底层 package 结构
 - `sheet.deleteCell()` 会真正移除 worksheet 里的 `<c>` 节点；如果你只是想保留样式占位但把值清空，继续用 `setCell(..., null)`
 - `workbook.getStyle()` 会读取 `styles.xml` 里的 `cellXfs` 样式定义；`workbook.updateStyle()` 会原位修改已有 `xf`；`workbook.cloneStyle()` 会基于已有 `xf` 追加一个新样式，并返回新的 `styleId`
@@ -652,7 +653,7 @@ await workbook.save("output.xlsx");
 - `npm run bench:check`
   - 对 `res/monster.xlsx` 运行 5 轮基准，并校验 `benchmarks/monster-baseline.json` 里的非空单元格数量，以及配置好的读写耗时阈值
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
-  - 自定义文件路径和迭代次数；输出 JSON 会同时包含致密遍历结果 `result`、稀疏遍历结果 `sparseResult`、批量写入结果 `writeResult`，以及每个 sheet 的放大量统计
+  - 自定义文件路径和迭代次数；输出 JSON 会同时包含带完整元数据的窗口读取结果 `windowResult`、value-only 窗口读取结果 `valueWindowResult`、致密遍历结果 `result`、稀疏遍历结果 `sparseResult`、批量写入结果 `writeResult`，以及每个 sheet 的放大量统计
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
   - 对任意基准文件执行回归检查；数量或配置的读写耗时超出阈值时进程会以非零状态退出
 

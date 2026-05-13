@@ -34,6 +34,8 @@ import type {
   SheetSelection,
   SheetTable as SheetTableHandle,
   SheetPrintTitles,
+  SheetValueWindowCell,
+  SheetValueWindowSnapshot,
   SheetWindowColumnEntry,
   SheetWindowCell,
   SheetWindowReadOptions,
@@ -223,7 +225,7 @@ import {
   upsertFreezePaneInSheetXml,
   upsertSheetSelectionInSheetXml,
 } from "./sheet/sheet-view-metadata.js";
-import { readWorkbookSheetWindow } from "./workbook/workbook-window-read.js";
+import { readWorkbookSheetValueWindow, readWorkbookSheetWindow } from "./workbook/workbook-window-read.js";
 import type { Workbook } from "./workbook.js";
 import { resolvePosix } from "./utils/path.js";
 import { findFirstXmlTag, findXmlTags, getTagAttr, type XmlTag } from "./utils/xml-read.js";
@@ -1511,10 +1513,27 @@ export class Sheet {
   }
 
   /**
+   * Reads a sparse worksheet value window without layout metadata.
+   */
+  readValueWindow(options: SheetWindowReadOptions): SheetValueWindowSnapshot {
+    this.ensureReadableState();
+    return readWorkbookSheetValueWindow(this.workbook, this, options);
+  }
+
+  /**
    * Iterates sparse logical cells inside one requested window.
    */
   *iterWindowCells(options: SheetWindowReadOptions): IterableIterator<SheetWindowCell> {
     for (const cell of this.readWindow(options).cells) {
+      yield cell;
+    }
+  }
+
+  /**
+   * Iterates sparse logical value cells inside one requested window.
+   */
+  *iterValueWindowCells(options: SheetWindowReadOptions): IterableIterator<SheetValueWindowCell> {
+    for (const cell of this.readValueWindow(options).cells) {
       yield cell;
     }
   }

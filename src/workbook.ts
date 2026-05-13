@@ -24,6 +24,7 @@ import type {
   DefinedName,
   RecalculateSummary,
   SetDefinedNameOptions,
+  SheetValueWindowSnapshot,
   SheetWindowReadOptions,
   SheetWindowSnapshot,
   SheetVisibility,
@@ -133,7 +134,10 @@ import {
   type StylesCache,
 } from "./workbook/workbook-styles-parse.js";
 import { buildWorkbookTemplateEntries } from "./workbook/workbook-template.js";
-import { invalidateWorkbookReadCaches, readWorkbookManifest } from "./workbook/workbook-window-read.js";
+import {
+  invalidateWorkbookReadCaches,
+  readWorkbookManifest,
+} from "./workbook/workbook-window-read.js";
 import { replaceXmlTagSource } from "./workbook/workbook-xml.js";
 import { Zip } from "./zip.js";
 import type { WorkbookContext } from "./workbook/workbook-context.js";
@@ -494,6 +498,13 @@ export class Workbook {
    */
   readSheetWindow(sheetName: string, options: SheetWindowReadOptions): SheetWindowSnapshot {
     return this.getSheet(sheetName).readWindow(options);
+  }
+
+  /**
+   * Reads a sparse worksheet value window without layout metadata.
+   */
+  readSheetValueWindow(sheetName: string, options: SheetWindowReadOptions): SheetValueWindowSnapshot {
+    return this.getSheet(sheetName).readValueWindow(options);
   }
 
   /**

@@ -606,6 +606,7 @@ Notes:
 - Later `getCell()` and `getFormula()` calls use those indexes directly instead of running a full string match on every read.
 - `sheet.rowCount` and `sheet.columnCount` mean the logical used bounds based on cells that currently have a value or formula. Pure blank placeholder `<c>` nodes and blank-only physical rows do not extend the used range. Empty sheets return `0`.
 - `sheet.getCellEntries()`, `iterCellEntries()`, `getRowEntries()`, `getColumnEntries()`, and `getRangeRef()` are the default logical read APIs. They skip blank placeholder `<c>` nodes that have neither a value nor a formula, and they follow the logical used bounds.
+- `sheet.readValueWindow()`, `sheet.iterValueWindowCells()`, and `workbook.readSheetValueWindow()` expose a lighter sparse value-only window API. They return only coordinates plus cached values, still include formula cells with `value: null`, and do not parse style, display, comment, merge, or layout metadata for the result.
 - `sheet.getPhysicalCellEntries()`, `iterPhysicalCellEntries()`, `getPhysicalRowEntries()`, `getPhysicalColumnEntries()`, and `getPhysicalRangeRef()` expose exact physical worksheet `<c>` node boundaries when you need to inspect low-level package structure.
 - `sheet.deleteCell()` removes the worksheet `<c>` node entirely; if you want to keep a styled placeholder but clear the value, continue using `setCell(..., null)`.
 - `workbook.getStyle()` reads `cellXfs` definitions from `styles.xml`, `workbook.updateStyle()` patches an existing `<xf>` in place, and `workbook.cloneStyle()` appends a new `<xf>` derived from an existing one and returns the new style id.
@@ -670,7 +671,7 @@ Common commands:
 - `npm run bench:check`
   - Run a 5-iteration benchmark on `res/monster.xlsx` and validate the non-null count plus the configured read/write thresholds from `benchmarks/monster-baseline.json`
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5`
-  - Run the benchmark with a custom file path and iteration count; the JSON output includes manifest reads (`manifestResult`), viewport reads (`windowResult`), dense traversal (`result`), sparse traversal (`sparseResult`), a batch write scenario (`writeResult`), and per-sheet amplification stats
+  - Run the benchmark with a custom file path and iteration count; the JSON output includes manifest reads (`manifestResult`), metadata-rich viewport reads (`windowResult`), value-only viewport reads (`valueWindowResult`), dense traversal (`result`), sparse traversal (`sparseResult`), a batch write scenario (`writeResult`), and per-sheet amplification stats
 - `node --import tsx scripts/benchmark.ts res/monster.xlsx 5 --check benchmarks/monster-baseline.json`
   - Run the regression check against any benchmark file; the process exits non-zero when the workbook count or configured read/write timing thresholds are exceeded
 

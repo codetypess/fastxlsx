@@ -21,7 +21,7 @@ export interface ManifestBenchmarkResult {
 }
 
 export interface WindowBenchmarkResult {
-  mode: "window";
+  mode: "window" | "value-window";
   runs: number[];
   averageMs: number;
   sheet: string;
@@ -61,6 +61,8 @@ export interface BenchmarkComparison {
   denseAmplification: number;
   manifestSheetCount: number;
   windowVisitedCells: number;
+  valueWindowVisitedCells: number;
+  windowToValueWindowAverageRatio: number;
 }
 
 export interface BenchmarkBaseline {
@@ -69,6 +71,7 @@ export interface BenchmarkBaseline {
   maxAverageMs?: number;
   maxSparseAverageMs?: number;
   maxWindowAverageMs?: number;
+  maxValueWindowAverageMs?: number;
   expectedBatchWriteSheet?: string;
   expectedBatchWriteWrites?: number;
   maxBatchWriteAverageMs?: number;
@@ -82,6 +85,7 @@ export async function runBenchmark(options: {
   iterations: number;
   manifestResult: ManifestBenchmarkResult;
   windowResult: WindowBenchmarkResult;
+  valueWindowResult: WindowBenchmarkResult;
   result: BenchmarkResult;
   sparseResult: BenchmarkResult;
   writeResult: BatchWriteBenchmarkResult;
@@ -94,6 +98,7 @@ export async function runBenchmark(options: {
   const windowTargetSheetName = resolveMaxPhysicalSheetName(summary);
   const manifestResult = await benchmarkManifestWorkbook(filePath, iterations);
   const windowResult = await benchmarkWindowWorkbook(filePath, iterations, windowTargetSheetName);
+  const valueWindowResult = await benchmarkValueWindowWorkbook(filePath, iterations, windowTargetSheetName);
   const result = await benchmark(iterations, "dense", () => benchmarkDenseWorkbook(filePath));
   const sparseResult = await benchmark(iterations, "sparse", () => benchmarkSparseWorkbook(filePath));
   const writeResult = await benchmarkBatchWrites(filePath, iterations);
@@ -104,6 +109,9 @@ export async function runBenchmark(options: {
     denseAmplification:
       sparseResult.nonNull === 0 ? 0 : Number((result.visitedCells / sparseResult.nonNull).toFixed(2)),
     windowVisitedCells: windowResult.visitedCells,
+    valueWindowVisitedCells: valueWindowResult.visitedCells,
+    windowToValueWindowAverageRatio:
+      valueWindowResult.averageMs === 0 ? 0 : Number((windowResult.averageMs / valueWindowResult.averageMs).toFixed(2)),
   };
 
   return {
@@ -111,6 +119,7 @@ export async function runBenchmark(options: {
     iterations,
     manifestResult,
     windowResult,
+    valueWindowResult,
     result,
     sparseResult,
     writeResult,
@@ -199,6 +208,7 @@ async function benchmarkWindowWorkbook(
   filePath: string,
   iterations: number,
   targetSheetName: string,
+  mode: WindowBenchmarkResult["mode"] = "window",
 ): Promise<WindowBenchmarkResult> {
   const runs: number[] = [];
   let sheet = "";
@@ -212,7 +222,7 @@ async function benchmarkWindowWorkbook(
     const startedAt = performance.now();
     const workbook = await Workbook.open(filePath);
     const targetSheet = workbook.getSheet(targetSheetName);
-    const window = readViewportWindow(targetSheet);
+    const window = mode === "window" ? readViewportWindow(targetSheet) : readViewportValueWindow(targetSheet);
     sheet = targetSheet.name;
     range = window.clampedRange ?? window.requestedRange;
     rowCount = window.rowCount;
@@ -223,7 +233,7 @@ async function benchmarkWindowWorkbook(
   }
 
   return {
-    mode: "window",
+    mode,
     runs,
     averageMs: Number((runs.reduce((sum, value) => sum + value, 0) / runs.length).toFixed(1)),
     sheet,
@@ -233,6 +243,14 @@ async function benchmarkWindowWorkbook(
     nonNull,
     visitedCells,
   };
+}
+
+async function benchmarkValueWindowWorkbook(
+  filePath: string,
+  iterations: number,
+  targetSheetName: string,
+): Promise<WindowBenchmarkResult> {
+  return benchmarkWindowWorkbook(filePath, iterations, targetSheetName, "value-window");
 }
 
 async function benchmarkSparseWorkbook(filePath: string): Promise<{ nonNull: number; visitedCells: number }> {
@@ -355,14 +373,20 @@ function resolveMaxPhysicalSheetName(summary: SheetBenchmarkSummary[]): string {
 }
 
 function readViewportWindow(sheet: ReturnType<Workbook["getSheets"]>[number]) {
-  const endRow = Math.min(sheet.rowCount || 1, 50);
-  const endColumn = Math.min(sheet.columnCount || 1, 20);
-
   return sheet.readWindow({
     startColumn: 1,
     startRow: 1,
-    endColumn,
-    endRow,
+    endColumn: 20,
+    endRow: 50,
+  });
+}
+
+function readViewportValueWindow(sheet: ReturnType<Workbook["getSheets"]>[number]) {
+  return sheet.readValueWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 20,
+    endRow: 50,
   });
 }
 
@@ -502,6 +526,15 @@ function validateAgainstBaseline(
 
   if (baseline.maxWindowAverageMs !== undefined && result.windowResult.averageMs > baseline.maxWindowAverageMs) {
     failures.push(`Window average ${result.windowResult.averageMs}ms exceeded ${baseline.maxWindowAverageMs}ms`);
+  }
+
+  if (
+    baseline.maxValueWindowAverageMs !== undefined &&
+    result.valueWindowResult.averageMs > baseline.maxValueWindowAverageMs
+  ) {
+    failures.push(
+      `Value-window average ${result.valueWindowResult.averageMs}ms exceeded ${baseline.maxValueWindowAverageMs}ms`,
+    );
   }
 
   if (baseline.expectedBatchWriteSheet !== undefined && result.writeResult.sheet !== baseline.expectedBatchWriteSheet) {

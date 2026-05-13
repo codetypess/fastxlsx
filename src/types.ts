@@ -327,6 +327,23 @@ export interface SheetWindowReadOptions {
   endColumn: number;
 }
 
+export interface SheetValueWindowCell {
+  address: string;
+  rowNumber: number;
+  columnNumber: number;
+  value: CellValue;
+}
+
+export interface SheetValueWindowSnapshot {
+  sheetName: string;
+  requestedRange: string;
+  clampedRange: string | null;
+  sheetRange: string | null;
+  rowCount: number;
+  columnCount: number;
+  cells: SheetValueWindowCell[];
+}
+
 export interface SheetWindowCell extends CellEntry {
   displayValue: string | null;
 }

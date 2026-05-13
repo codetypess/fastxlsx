@@ -358,6 +358,124 @@ test("sheet windows treat comment-only blank cells as used bounds", () => {
   assert.deepEqual(window.comments, [{ address: "D5", author: "Alice", text: "Only note" }]);
 });
 
+test("sheet value windows read sparse values without layout metadata", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", "Header");
+  sheet.setCell("B2", 10);
+  sheet.setFormula("C2", "B2*2", { cachedValue: 20 });
+  sheet.setFormula("D2", "B2*3");
+  sheet.setCell("A3", true);
+  sheet.setComment("E5", "Ignored note", { author: "Alice" });
+
+  const window = workbook.readSheetValueWindow("Sheet1", {
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 5,
+    endRow: 5,
+  });
+
+  assert.equal(window.requestedRange, "A1:E5");
+  assert.equal(window.clampedRange, "A1:D3");
+  assert.equal(window.sheetRange, "A1:D3");
+  assert.equal(window.rowCount, 3);
+  assert.equal(window.columnCount, 4);
+  assert.deepEqual(window.cells, [
+    { address: "A1", columnNumber: 1, rowNumber: 1, value: "Header" },
+    { address: "B2", columnNumber: 2, rowNumber: 2, value: 10 },
+    { address: "C2", columnNumber: 3, rowNumber: 2, value: 20 },
+    { address: "D2", columnNumber: 4, rowNumber: 2, value: null },
+    { address: "A3", columnNumber: 1, rowNumber: 3, value: true },
+  ]);
+  assert.deepEqual(
+    Array.from(sheet.iterValueWindowCells({
+      startColumn: 1,
+      startRow: 1,
+      endColumn: 5,
+      endRow: 5,
+    })),
+    window.cells,
+  );
+  assert.deepEqual(
+    sheet.readValueWindow({
+      startColumn: 1,
+      startRow: 1,
+      endColumn: 5,
+      endRow: 5,
+    }),
+    window,
+  );
+});
+
+test("sheet value windows ignore comment-only bounds", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setComment("D5", "Only note", { author: "Alice" });
+
+  const window = sheet.readValueWindow({
+    startColumn: 4,
+    startRow: 5,
+    endColumn: 4,
+    endRow: 5,
+  });
+
+  assert.equal(window.sheetRange, null);
+  assert.equal(window.clampedRange, null);
+  assert.equal(window.rowCount, 0);
+  assert.equal(window.columnCount, 0);
+  assert.deepEqual(window.cells, []);
+});
+
+test("sheet value windows refresh after writes and structural edits", () => {
+  const workbook = Workbook.create("Sheet1");
+  const sheet = workbook.getSheet("Sheet1");
+
+  sheet.setCell("A1", "Left");
+  sheet.setCell("B2", "Tail");
+
+  const before = sheet.readValueWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 2,
+    endRow: 2,
+  });
+  assert.equal(before.sheetRange, "A1:B2");
+  assert.deepEqual(before.cells, [
+    { address: "A1", columnNumber: 1, rowNumber: 1, value: "Left" },
+    { address: "B2", columnNumber: 2, rowNumber: 2, value: "Tail" },
+  ]);
+
+  sheet.setCell("C1", "Middle");
+  const afterWrite = sheet.readValueWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 3,
+    endRow: 2,
+  });
+  assert.equal(afterWrite.sheetRange, "A1:C2");
+  assert.deepEqual(afterWrite.cells, [
+    { address: "A1", columnNumber: 1, rowNumber: 1, value: "Left" },
+    { address: "C1", columnNumber: 3, rowNumber: 1, value: "Middle" },
+    { address: "B2", columnNumber: 2, rowNumber: 2, value: "Tail" },
+  ]);
+
+  sheet.insertColumn("A");
+  const afterShift = sheet.readValueWindow({
+    startColumn: 1,
+    startRow: 1,
+    endColumn: 4,
+    endRow: 2,
+  });
+  assert.equal(afterShift.sheetRange, "B1:D2");
+  assert.deepEqual(afterShift.cells, [
+    { address: "B1", columnNumber: 2, rowNumber: 1, value: "Left" },
+    { address: "D1", columnNumber: 4, rowNumber: 1, value: "Middle" },
+    { address: "C2", columnNumber: 3, rowNumber: 2, value: "Tail" },
+  ]);
+});
+
 test("sheet windows resolve shared formulas outside the requested viewport", async () => {
   const fixtureDir = resolve("test/fixtures/lossless-source");
   const entries = replaceEntryText(

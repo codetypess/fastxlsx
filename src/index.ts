@@ -60,6 +60,8 @@ export type {
   SheetImportRecordsResult,
   SheetUpdateRecordResult,
   SheetSelection,
+  SheetValueWindowCell,
+  SheetValueWindowSnapshot,
   SheetWindowColumnEntry,
   SheetWindowCell,
   SheetWindowRowEntry,
