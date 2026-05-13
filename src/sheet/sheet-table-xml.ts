@@ -2,120 +2,123 @@ import { basenamePosix, dirnamePosix, resolveRelationshipTarget } from "../utils
 import { findFirstXmlTag, findXmlTags, getTagAttr } from "../utils/xml-read.js";
 import { parseAttributes } from "../utils/xml.js";
 import {
-  rewriteAutoFilterTagWithTransformedRefs,
-  rewriteSortStateTagWithTransformedRefs,
+    rewriteAutoFilterTagWithTransformedRefs,
+    rewriteSortStateTagWithTransformedRefs,
 } from "./sheet-auto-filter.js";
 import { buildXmlElement, replaceXmlTagSource, rewriteXmlTagsByName } from "./sheet-xml.js";
 
 export interface TableReference {
-  relationshipId: string;
-  path: string;
+    relationshipId: string;
+    path: string;
 }
 
 export const EMPTY_RELATIONSHIPS_XML =
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-  `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
 
 export function listTableReferences(
-  sheetXml: string,
-  sheetPath: string,
-  entryPaths: string[],
-  readEntryText: (path: string) => string,
+    sheetXml: string,
+    sheetPath: string,
+    entryPaths: string[],
+    readEntryText: (path: string) => string
 ): TableReference[] {
-  const sheetRelationshipIds = findXmlTags(sheetXml, "tablePart")
-    .filter((tag) => tag.selfClosing)
-    .map((tag) => getTagAttr(tag, "r:id"))
-    .filter((relationshipId): relationshipId is string => relationshipId !== undefined);
-  if (sheetRelationshipIds.length === 0) {
-    return [];
-  }
-
-  const relationshipsPath = getSheetRelationshipsPath(sheetPath);
-  if (!entryPaths.includes(relationshipsPath)) {
-    return [];
-  }
-
-  const relationshipsXml = readEntryText(relationshipsPath);
-  const baseDir = dirnamePosix(sheetPath);
-  const tables: TableReference[] = [];
-
-  for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
-    if (!relationshipTag.selfClosing) {
-      continue;
+    const sheetRelationshipIds = findXmlTags(sheetXml, "tablePart")
+        .filter((tag) => tag.selfClosing)
+        .map((tag) => getTagAttr(tag, "r:id"))
+        .filter((relationshipId): relationshipId is string => relationshipId !== undefined);
+    if (sheetRelationshipIds.length === 0) {
+        return [];
     }
 
-    const relationshipId = getTagAttr(relationshipTag, "Id");
-    const type = getTagAttr(relationshipTag, "Type");
-    const target = getTagAttr(relationshipTag, "Target");
-
-    if (
-      !relationshipId ||
-      !type ||
-      !target ||
-      !sheetRelationshipIds.includes(relationshipId) ||
-      !/\/table$/.test(type)
-    ) {
-      continue;
+    const relationshipsPath = getSheetRelationshipsPath(sheetPath);
+    if (!entryPaths.includes(relationshipsPath)) {
+        return [];
     }
 
-    tables.push({
-      relationshipId,
-      path: resolveRelationshipTarget(baseDir, target),
-    });
-  }
+    const relationshipsXml = readEntryText(relationshipsPath);
+    const baseDir = dirnamePosix(sheetPath);
+    const tables: TableReference[] = [];
 
-  return tables;
+    for (const relationshipTag of findXmlTags(relationshipsXml, "Relationship")) {
+        if (!relationshipTag.selfClosing) {
+            continue;
+        }
+
+        const relationshipId = getTagAttr(relationshipTag, "Id");
+        const type = getTagAttr(relationshipTag, "Type");
+        const target = getTagAttr(relationshipTag, "Target");
+
+        if (
+            !relationshipId ||
+            !type ||
+            !target ||
+            !sheetRelationshipIds.includes(relationshipId) ||
+            !/\/table$/.test(type)
+        ) {
+            continue;
+        }
+
+        tables.push({
+            relationshipId,
+            path: resolveRelationshipTarget(baseDir, target),
+        });
+    }
+
+    return tables;
 }
 
 export function rewriteTableReferenceXml(
-  tableXml: string,
-  transformRange: (range: string) => string | null,
-  targetColumnNumber: number,
-  columnCount: number,
-  mode: "shift" | "delete",
+    tableXml: string,
+    transformRange: (range: string) => string | null,
+    targetColumnNumber: number,
+    columnCount: number,
+    mode: "shift" | "delete"
 ): string | null {
-  const tableTag = findFirstXmlTag(tableXml, "table");
-  if (!tableTag) {
-    return tableXml;
-  }
+    const tableTag = findFirstXmlTag(tableXml, "table");
+    if (!tableTag) {
+        return tableXml;
+    }
 
-  const tableAttributes = parseAttributes(tableTag.attributesSource);
-  const refIndex = tableAttributes.findIndex(([name]) => name === "ref");
-  if (refIndex === -1) {
-    return tableXml;
-  }
+    const tableAttributes = parseAttributes(tableTag.attributesSource);
+    const refIndex = tableAttributes.findIndex(([name]) => name === "ref");
+    if (refIndex === -1) {
+        return tableXml;
+    }
 
-  const currentRange = tableAttributes[refIndex]?.[1] ?? "";
-  const nextRange = transformRange(currentRange);
-  if (nextRange === null) {
-    return null;
-  }
+    const currentRange = tableAttributes[refIndex]?.[1] ?? "";
+    const nextRange = transformRange(currentRange);
+    if (nextRange === null) {
+        return null;
+    }
 
-  const nextTableAttributes = [...tableAttributes];
-  nextTableAttributes[refIndex] = ["ref", nextRange];
-  let nextTableXml = replaceXmlTagSource(
-    tableXml,
-    tableTag,
-    buildXmlElement("table", nextTableAttributes, tableTag.innerXml ?? ""),
-  );
-  nextTableXml = rewriteXmlTagsByName(nextTableXml, "autoFilter", (autoFilterTag) => {
-    const nextAutoFilterXml = rewriteAutoFilterTagWithTransformedRefs(
-      autoFilterTag,
-      transformRange,
-      targetColumnNumber,
-      columnCount,
-      mode,
+    const nextTableAttributes = [...tableAttributes];
+    nextTableAttributes[refIndex] = ["ref", nextRange];
+    let nextTableXml = replaceXmlTagSource(
+        tableXml,
+        tableTag,
+        buildXmlElement("table", nextTableAttributes, tableTag.innerXml ?? "")
     );
-    return nextAutoFilterXml ?? "";
-  });
-  nextTableXml = rewriteXmlTagsByName(nextTableXml, "sortState", (sortStateTag) => {
-    const nextSortStateXml = rewriteSortStateTagWithTransformedRefs(sortStateTag, transformRange);
-    return nextSortStateXml ?? "";
-  });
+    nextTableXml = rewriteXmlTagsByName(nextTableXml, "autoFilter", (autoFilterTag) => {
+        const nextAutoFilterXml = rewriteAutoFilterTagWithTransformedRefs(
+            autoFilterTag,
+            transformRange,
+            targetColumnNumber,
+            columnCount,
+            mode
+        );
+        return nextAutoFilterXml ?? "";
+    });
+    nextTableXml = rewriteXmlTagsByName(nextTableXml, "sortState", (sortStateTag) => {
+        const nextSortStateXml = rewriteSortStateTagWithTransformedRefs(
+            sortStateTag,
+            transformRange
+        );
+        return nextSortStateXml ?? "";
+    });
 
-  return nextTableXml;
+    return nextTableXml;
 }
 
 export function getSheetRelationshipsPath(sheetPath: string): string {
-  return `${dirnamePosix(sheetPath)}/_rels/${basenamePosix(sheetPath)}.rels`;
+    return `${dirnamePosix(sheetPath)}/_rels/${basenamePosix(sheetPath)}.rels`;
 }

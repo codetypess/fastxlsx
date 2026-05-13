@@ -33,6 +33,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "format": "prettier --write test src",
     "clean": "node --import tsx scripts/clean-dist.ts",
     "build": "npm run clean && tsc -p tsconfig.json",
     "cli": "node --import tsx src/cli.ts",
@@ -53,6 +54,7 @@
   },
   "dependencies": {
     "commander": "^14.0.3",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "prettier": "^3.8.3"
   }
 }

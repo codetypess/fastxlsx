@@ -4,35 +4,35 @@ import { extname, join } from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 
 import {
-  formatError,
-  parseJsonCellRecord,
-  parseJsonCellRecordArray,
-  parseJsonStringArray,
-  resolveMatchValue,
-  resolveUpsertMatchValue,
-  writeJson,
+    formatError,
+    parseJsonCellRecord,
+    parseJsonCellRecordArray,
+    parseJsonStringArray,
+    resolveMatchValue,
+    resolveUpsertMatchValue,
+    writeJson,
 } from "./cli-json.js";
 import { parsePositiveInteger, resolveFrom, resolveOutputPath } from "./cli-shared.js";
 import type { CliCommandIo } from "./cli-shared.js";
 import {
-  findConfigTableRow,
-  findStructuredTableRow,
-  generateTableProfiles,
-  getConfigTableRecord,
-  getConfigTableRows,
-  getStructuredTableRecord,
-  getStructuredTableRows,
-  inspectTable,
-  listConfigTableRows,
-  listStructuredTableRows,
-  parseTableKey,
-  pickKeyRecord,
-  readConfigTableSyncInput,
-  resolveConfigTableHeaders,
-  resolveTableCommandContext,
-  resolveTableKeyFields,
-  writeStructuredTableRecord,
-  writeStructuredTableRecords,
+    findConfigTableRow,
+    findStructuredTableRow,
+    generateTableProfiles,
+    getConfigTableRecord,
+    getConfigTableRows,
+    getStructuredTableRecord,
+    getStructuredTableRows,
+    inspectTable,
+    listConfigTableRows,
+    listStructuredTableRows,
+    parseTableKey,
+    pickKeyRecord,
+    readConfigTableSyncInput,
+    resolveConfigTableHeaders,
+    resolveTableCommandContext,
+    resolveTableKeyFields,
+    writeStructuredTableRecord,
+    writeStructuredTableRecords,
 } from "./cli-table.js";
 import type { TableCommandContext } from "./cli-table.js";
 import { Workbook } from "../workbook.js";
@@ -40,945 +40,1085 @@ import { Workbook } from "../workbook.js";
 type ConfigTableSyncMode = "replace" | "update" | "upsert";
 type WorkbookSheet = ReturnType<Workbook["getSheet"]>;
 
-export function registerTableCommands(
-  program: Command,
-  io: CliCommandIo,
-): void {
-  const configTable = program
-    .command("config-table")
-    .description("High-level workflow for header-based config sheets");
+export function registerTableCommands(program: Command, io: CliCommandIo): void {
+    const configTable = program
+        .command("config-table")
+        .description("High-level workflow for header-based config sheets");
 
-  configTable
-    .command("init")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--headers <json>", "JSON array of header strings")
-    .option("--header-row <row>", "target header row", parsePositiveInteger, 1)
-    .option("--start-column <column>", "1-based start column", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          headerRow: number;
-          headers: string;
-          inPlace?: boolean;
-          output?: string;
-          sheet: string;
-          startColumn: number;
-        },
-      ) => {
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = getOrCreateSheet(workbook, options.sheet);
-        const headers = parseJsonStringArray(options.headers, "--headers");
-        sheet.setHeaders(headers, options.headerRow, options.startColumn);
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.init",
-          headers: sheet.getHeaders(options.headerRow),
-          input: inputPath,
-          output: outputPath,
-          sheet: options.sheet,
-        });
-      },
-    );
-
-  configTable
-    .command("list")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .action(async (file: string, options: { headerRow: number; sheet: string }) => {
-      const result = await getConfigTableRows(resolveFrom(io.cwd, file), options.sheet, options.headerRow);
-      writeJson(io.stdout, result);
-    });
-
-  configTable
-    .command("get")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--field <name>", "header field used as the lookup key")
-    .option("--value <json>", "JSON scalar value to match")
-    .option("--text <value>", "plain string value to match")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .action(
-      async (
-        file: string,
-        options: {
-          field: string;
-          headerRow: number;
-          sheet: string;
-          text?: string;
-          value?: string;
-        },
-      ) => {
-        const matchValue = resolveMatchValue(options.value, options.text);
-        const result = await getConfigTableRecord(
-          resolveFrom(io.cwd, file),
-          options.sheet,
-          options.headerRow,
-          options.field,
-          matchValue,
-        );
-        writeJson(io.stdout, result);
-      },
-    );
-
-  configTable
-    .command("upsert")
-    .description("Insert by key or replace a matched config row")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--field <name>", "header field used as the match key")
-    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are cleared on matched rows")
-    .option("--match-value <json>", "JSON scalar override for the lookup value")
-    .option("--match-text <value>", "plain string override for the lookup value")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          field: string;
-          headerRow: number;
-          inPlace?: boolean;
-          matchText?: string;
-          matchValue?: string;
-          output?: string;
-          record: string;
-          sheet: string;
-        },
-      ) => {
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
-        const record = parseJsonCellRecord(options.record, "--record");
-        const matchValue = resolveUpsertMatchValue(
-          record,
-          options.field,
-          options.matchValue,
-          options.matchText,
-        );
-        const matchedRow = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
-
-        if (matchedRow === null) {
-          sheet.addRecord(record, options.headerRow);
-        } else {
-          sheet.replaceRecord(matchedRow, record, options.headerRow);
-        }
-
-        const row = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.upsert",
-          input: inputPath,
-          inserted: matchedRow === null,
-          matchField: options.field,
-          matchValue,
-          output: outputPath,
-          record,
-          recordCount: countConfigTableRecords(sheet, options.headerRow),
-          row,
-          sheet: options.sheet,
-        });
-      },
-    );
-
-  configTable
-    .command("update")
-    .description("Patch a matched config row without clearing omitted fields")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--field <name>", "header field used as the lookup key")
-    .option("--value <json>", "JSON scalar value to match")
-    .option("--text <value>", "plain string value to match")
-    .requiredOption("--record <json>", "JSON object keyed by header names; omitted fields are preserved")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          field: string;
-          headerRow: number;
-          inPlace?: boolean;
-          output?: string;
-          record: string;
-          sheet: string;
-          text?: string;
-          value?: string;
-        },
-      ) => {
-        const matchValue = resolveMatchValue(options.value, options.text);
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
-        const record = parseJsonCellRecord(options.record, "--record");
-        const row = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
-
-        if (row !== null) {
-          sheet.setRecord(row, record, options.headerRow);
-        }
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.update",
-          input: inputPath,
-          matchField: options.field,
-          matchValue,
-          output: outputPath,
-          record,
-          recordCount: countConfigTableRecords(sheet, options.headerRow),
-          row,
-          sheet: options.sheet,
-          updated: row !== null,
-        });
-      },
-    );
-
-  configTable
-    .command("delete")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--field <name>", "header field used as the lookup key")
-    .option("--value <json>", "JSON scalar value to match")
-    .option("--text <value>", "plain string value to match")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          field: string;
-          headerRow: number;
-          inPlace?: boolean;
-          output?: string;
-          sheet: string;
-          text?: string;
-          value?: string;
-        },
-      ) => {
-        const matchValue = resolveMatchValue(options.value, options.text);
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
-        const row = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
-
-        if (row !== null) {
-          sheet.deleteRecord(row, options.headerRow);
-        }
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.delete",
-          deleted: row !== null,
-          input: inputPath,
-          matchField: options.field,
-          matchValue,
-          output: outputPath,
-          recordCount: countConfigTableRecords(sheet, options.headerRow),
-          row,
-          sheet: options.sheet,
-        });
-      },
-    );
-
-  configTable
-    .command("replace")
-    .description("Replace the full config record set below the header row")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--records <json>", "JSON array of record objects")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          headerRow: number;
-          inPlace?: boolean;
-          output?: string;
-          records: string;
-          sheet: string;
-        },
-      ) => {
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(options.sheet);
-        const records = parseJsonCellRecordArray(options.records, "--records");
-        sheet.setRecords(records, options.headerRow);
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.replace",
-          input: inputPath,
-          output: outputPath,
-          recordCount: countConfigTableRecords(sheet, options.headerRow),
-          sheet: options.sheet,
-        });
-      },
-    );
-
-  configTable
-    .command("sync")
-    .description("Sync config rows with replace, update, or upsert semantics")
-    .argument("<file>", "input xlsx file")
-    .requiredOption("--sheet <name>", "sheet name")
-    .requiredOption("--from-json <file>", "JSON file containing records or a config object")
-    .option("--field <name>", "header field used as the key when normalizing config objects", "Key")
-    .option("--value-field <name>", "header field used for scalar config object values", "Value")
-    .option("--headers <json>", "JSON array of header strings")
-    .option("--mode <mode>", "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows", parseConfigTableSyncMode, "replace")
-    .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          field: string;
-          fromJson: string;
-          headerRow: number;
-          headers?: string;
-          inPlace?: boolean;
-          mode: ConfigTableSyncMode;
-          output?: string;
-          sheet: string;
-          valueField: string;
-        },
-      ) => {
-        const inputPath = resolveFrom(io.cwd, file);
-        const jsonPath = resolveFrom(io.cwd, options.fromJson);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = getOrCreateSheet(workbook, options.sheet);
-        const syncInput = await readConfigTableSyncInput(jsonPath, options.field, options.valueField);
-        const explicitHeaders =
-          options.headers === undefined ? undefined : parseJsonStringArray(options.headers, "--headers");
-        const headers = resolveConfigTableHeaders(
-          sheet,
-          options.headerRow,
-          explicitHeaders ?? syncInput.headers,
-          syncInput.records,
-        );
-
-        sheet.setHeaders(headers, options.headerRow);
-
-        if (options.mode === "replace") {
-          sheet.setRecords(syncInput.records, options.headerRow);
-        } else {
-          for (const record of syncInput.records) {
-            const matchValue = resolveUpsertMatchValue(record, options.field);
-            const matchedRow = findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ?? null;
-
-            if (matchedRow === null) {
-              if (options.mode === "upsert") {
-                sheet.addRecord(record, options.headerRow);
-              }
-            } else if (options.mode === "update") {
-              sheet.setRecord(matchedRow, record, options.headerRow);
-            } else {
-              sheet.replaceRecord(matchedRow, record, options.headerRow);
+    configTable
+        .command("init")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--headers <json>", "JSON array of header strings")
+        .option("--header-row <row>", "target header row", parsePositiveInteger, 1)
+        .option("--start-column <column>", "1-based start column", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    headerRow: number;
+                    headers: string;
+                    inPlace?: boolean;
+                    output?: string;
+                    sheet: string;
+                    startColumn: number;
+                }
+            ) => {
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = getOrCreateSheet(workbook, options.sheet);
+                const headers = parseJsonStringArray(options.headers, "--headers");
+                sheet.setHeaders(headers, options.headerRow, options.startColumn);
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.init",
+                    headers: sheet.getHeaders(options.headerRow),
+                    input: inputPath,
+                    output: outputPath,
+                    sheet: options.sheet,
+                });
             }
-          }
-        }
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "configTable.sync",
-          headers,
-          input: inputPath,
-          mode: options.mode,
-          output: outputPath,
-          recordCount: countConfigTableRecords(sheet, options.headerRow),
-          sheet: options.sheet,
-          source: jsonPath,
-        });
-      },
-    );
-
-  const table = program
-    .command("table")
-    .description("Operate on structured sheets with explicit header and data row boundaries");
-
-  table
-    .command("generate-profiles")
-    .argument("[files...]", "input xlsx files")
-    .option("--files-from <file>", "read input xlsx file paths from a newline-delimited file")
-    .option("--from-dir <directory>", "recursively read input xlsx files from a directory", collectRepeatedStrings)
-    .option("--ignore <file>", "input xlsx file path to ignore; can be repeated", collectRepeatedStrings)
-    .option("--sheet-filter <regex>", "regular expression used to select sheet names", parseRegex)
-    .option("--output <file>", "write generated profiles JSON to a file")
-    .action(
-      async (
-        files: string[],
-        options: {
-          filesFrom?: string;
-          fromDir?: string[];
-          ignore?: string[];
-          output?: string;
-          sheetFilter?: RegExp;
-        },
-      ) => {
-        const inputPaths = await resolveGenerateProfileInputPaths(io.cwd, files, {
-          filesFrom: options.filesFrom,
-          fromDirs: options.fromDir ?? [],
-          ignoredFiles: options.ignore ?? [],
-        });
-        const result = await generateTableProfiles(inputPaths, {
-          sheetFilter: options.sheetFilter,
-        });
-        const outputPath = options.output ? resolveFrom(io.cwd, options.output) : null;
-
-        if (outputPath) {
-          const outputPayload =
-            result.skipped.length === 0
-              ? { profiles: result.profiles }
-              : { profiles: result.profiles, skipped: result.skipped };
-          await writeFile(outputPath, `${JSON.stringify(outputPayload, null, 2)}\n`);
-        }
-
-        if (outputPath) {
-          io.stdout(`Generated profile file: ${outputPath}\n`);
-        } else {
-          writeJson(io.stdout, {
-            ...result,
-            output: null,
-          });
-        }
-      },
-    );
-
-  table
-    .command("inspect")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          profile?: string;
-          profilesFile?: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const result = await inspectTable(
-          resolveFrom(io.cwd, file),
-          context.sheet,
-          context.headerRow,
-          context.dataStartRow,
-        );
-        writeJson(io.stdout, result);
-      },
-    );
-
-  table
-    .command("list")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          profile?: string;
-          profilesFile?: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const result = await getStructuredTableRows(
-          resolveFrom(io.cwd, file),
-          context.sheet,
-          context.headerRow,
-          context.dataStartRow,
-        );
-        writeJson(io.stdout, result);
-      },
-    );
-
-  table
-    .command("get")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
-    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          key: string;
-          keyField: string[];
-          profile?: string;
-          profilesFile?: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const result = await getStructuredTableRecord(
-          resolveFrom(io.cwd, file),
-          context.sheet,
-          context.headerRow,
-          context.dataStartRow,
-          context.keyFields,
-          options.key,
-        );
-        writeJson(io.stdout, result);
-      },
-    );
-
-  table
-    .command("upsert")
-    .description("Insert by key or replace a matched structured row")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--record <json>", "JSON object keyed by field names; omitted fields are cleared on matched rows")
-    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          inPlace?: boolean;
-          keyField: string[];
-          output?: string;
-          profile?: string;
-          profilesFile?: string;
-          record: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(context.sheet);
-        const record = parseJsonCellRecord(options.record, "--record");
-        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
-        const keyRecord = pickKeyRecord(record, keyFields);
-        const matchedRow =
-          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
-
-        if (matchedRow === null) {
-          sheet.addRecord(record, context.headerRow);
-        } else {
-          writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
-        }
-
-        const row =
-          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "table.upsert",
-          dataStartRow: context.dataStartRow,
-          headerRow: context.headerRow,
-          input: inputPath,
-          inserted: matchedRow === null,
-          keyFields,
-          output: outputPath,
-          record,
-          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
-          row,
-          sheet: context.sheet,
-        });
-      },
-    );
-
-  table
-    .command("update")
-    .description("Patch a matched structured row without clearing omitted fields")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
-    .requiredOption("--record <json>", "JSON object keyed by field names; omitted fields are preserved")
-    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          inPlace?: boolean;
-          key: string;
-          keyField: string[];
-          output?: string;
-          profile?: string;
-          profilesFile?: string;
-          record: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(context.sheet);
-        const record = parseJsonCellRecord(options.record, "--record");
-        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
-        const keyRecord = parseTableKey(options.key, keyFields, "--key");
-        const row =
-          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
-
-        if (row !== null) {
-          sheet.setRecord(row, record, context.headerRow);
-        }
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "table.update",
-          dataStartRow: context.dataStartRow,
-          headerRow: context.headerRow,
-          input: inputPath,
-          key: keyRecord,
-          keyFields,
-          output: outputPath,
-          record,
-          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
-          row,
-          sheet: context.sheet,
-          updated: row !== null,
-        });
-      },
-    );
-
-  table
-    .command("delete")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
-    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          headerRow?: number;
-          inPlace?: boolean;
-          key: string;
-          keyField: string[];
-          output?: string;
-          profile?: string;
-          profilesFile?: string;
-          sheet?: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const inputPath = resolveFrom(io.cwd, file);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(context.sheet);
-        const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
-        const keyRecord = parseTableKey(options.key, keyFields, "--key");
-        const row =
-          findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ?? null;
-
-        if (row !== null) {
-          sheet.deleteRecord(row, context.headerRow);
-        }
-
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "table.delete",
-          dataStartRow: context.dataStartRow,
-          deleted: row !== null,
-          headerRow: context.headerRow,
-          input: inputPath,
-          key: keyRecord,
-          keyFields,
-          output: outputPath,
-          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
-          row,
-          sheet: context.sheet,
-        });
-      },
-    );
-
-  table
-    .command("sync")
-    .description("Sync structured rows with replace, update, or upsert semantics")
-    .argument("<file>", "input xlsx file")
-    .option("--sheet <name>", "sheet name")
-    .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
-    .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
-    .requiredOption("--from-json <file>", "JSON file containing records or a config object")
-    .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
-    .option("--profile <name>", "table profile name")
-    .option("--profiles-file <file>", "JSON file containing table profiles")
-    .option("--value-field <name>", "field name used when normalizing scalar config objects", "Value")
-    .option("--headers <json>", "JSON array of header strings")
-    .option("--mode <mode>", "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows", parseConfigTableSyncMode, "replace")
-    .option("--output <file>", "output xlsx path")
-    .option("--in-place", "overwrite the input workbook")
-    .action(
-      async (
-        file: string,
-        options: {
-          dataStartRow?: number;
-          fromJson: string;
-          headerRow?: number;
-          headers?: string;
-          inPlace?: boolean;
-          keyField: string[];
-          mode: ConfigTableSyncMode;
-          output?: string;
-          profile?: string;
-          profilesFile?: string;
-          sheet?: string;
-          valueField: string;
-        },
-      ) => {
-        const context = await resolveCliTableCommandContext(io.cwd, options);
-        const inputPath = resolveFrom(io.cwd, file);
-        const jsonPath = resolveFrom(io.cwd, options.fromJson);
-        const outputPath = resolveOutputPath(inputPath, {
-          inPlace: options.inPlace === true,
-          output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
-        });
-        const workbook = await Workbook.open(inputPath);
-        const sheet = workbook.getSheet(context.sheet);
-        const syncInput = await readConfigTableSyncInput(
-          jsonPath,
-          context.keyFields[0] ?? "Key",
-          options.valueField,
-        );
-        const explicitHeaders =
-          options.headers === undefined ? undefined : parseJsonStringArray(options.headers, "--headers");
-        const headers = resolveConfigTableHeaders(
-          sheet,
-          context.headerRow,
-          explicitHeaders ?? syncInput.headers,
-          syncInput.records,
         );
 
-        sheet.setHeaders(headers, context.headerRow);
+    configTable
+        .command("list")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .action(async (file: string, options: { headerRow: number; sheet: string }) => {
+            const result = await getConfigTableRows(
+                resolveFrom(io.cwd, file),
+                options.sheet,
+                options.headerRow
+            );
+            writeJson(io.stdout, result);
+        });
 
-        if (options.mode === "replace") {
-          writeStructuredTableRecords(sheet, context.headerRow, context.dataStartRow, syncInput.records);
-        } else {
-          const keyFields = resolveTableKeyFields(sheet, context.headerRow, context.keyFields);
-          for (const record of syncInput.records) {
-            const keyRecord = pickKeyRecord(record, keyFields);
-            const matchedRow =
-              findStructuredTableRow(sheet, context.headerRow, context.dataStartRow, keyFields, keyRecord)?.row ??
-              null;
-
-            if (matchedRow === null) {
-              if (options.mode === "upsert") {
-                sheet.addRecord(record, context.headerRow);
-              }
-            } else if (options.mode === "update") {
-              sheet.setRecord(matchedRow, record, context.headerRow);
-            } else {
-              writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
+    configTable
+        .command("get")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--field <name>", "header field used as the lookup key")
+        .option("--value <json>", "JSON scalar value to match")
+        .option("--text <value>", "plain string value to match")
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .action(
+            async (
+                file: string,
+                options: {
+                    field: string;
+                    headerRow: number;
+                    sheet: string;
+                    text?: string;
+                    value?: string;
+                }
+            ) => {
+                const matchValue = resolveMatchValue(options.value, options.text);
+                const result = await getConfigTableRecord(
+                    resolveFrom(io.cwd, file),
+                    options.sheet,
+                    options.headerRow,
+                    options.field,
+                    matchValue
+                );
+                writeJson(io.stdout, result);
             }
-          }
-        }
+        );
 
-        await workbook.save(outputPath);
-        writeJson(io.stdout, {
-          action: "table.sync",
-          dataStartRow: context.dataStartRow,
-          headerRow: context.headerRow,
-          input: inputPath,
-          mode: options.mode,
-          output: outputPath,
-          recordCount: countStructuredTableRecords(sheet, context.headerRow, context.dataStartRow),
-          sheet: context.sheet,
-          source: jsonPath,
-        });
-      },
-    );
+    configTable
+        .command("upsert")
+        .description("Insert by key or replace a matched config row")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--field <name>", "header field used as the match key")
+        .requiredOption(
+            "--record <json>",
+            "JSON object keyed by header names; omitted fields are cleared on matched rows"
+        )
+        .option("--match-value <json>", "JSON scalar override for the lookup value")
+        .option("--match-text <value>", "plain string override for the lookup value")
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    field: string;
+                    headerRow: number;
+                    inPlace?: boolean;
+                    matchText?: string;
+                    matchValue?: string;
+                    output?: string;
+                    record: string;
+                    sheet: string;
+                }
+            ) => {
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(options.sheet);
+                const record = parseJsonCellRecord(options.record, "--record");
+                const matchValue = resolveUpsertMatchValue(
+                    record,
+                    options.field,
+                    options.matchValue,
+                    options.matchText
+                );
+                const matchedRow =
+                    findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ??
+                    null;
+
+                if (matchedRow === null) {
+                    sheet.addRecord(record, options.headerRow);
+                } else {
+                    sheet.replaceRecord(matchedRow, record, options.headerRow);
+                }
+
+                const row =
+                    findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ??
+                    null;
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.upsert",
+                    input: inputPath,
+                    inserted: matchedRow === null,
+                    matchField: options.field,
+                    matchValue,
+                    output: outputPath,
+                    record,
+                    recordCount: countConfigTableRecords(sheet, options.headerRow),
+                    row,
+                    sheet: options.sheet,
+                });
+            }
+        );
+
+    configTable
+        .command("update")
+        .description("Patch a matched config row without clearing omitted fields")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--field <name>", "header field used as the lookup key")
+        .option("--value <json>", "JSON scalar value to match")
+        .option("--text <value>", "plain string value to match")
+        .requiredOption(
+            "--record <json>",
+            "JSON object keyed by header names; omitted fields are preserved"
+        )
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    field: string;
+                    headerRow: number;
+                    inPlace?: boolean;
+                    output?: string;
+                    record: string;
+                    sheet: string;
+                    text?: string;
+                    value?: string;
+                }
+            ) => {
+                const matchValue = resolveMatchValue(options.value, options.text);
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(options.sheet);
+                const record = parseJsonCellRecord(options.record, "--record");
+                const row =
+                    findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ??
+                    null;
+
+                if (row !== null) {
+                    sheet.setRecord(row, record, options.headerRow);
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.update",
+                    input: inputPath,
+                    matchField: options.field,
+                    matchValue,
+                    output: outputPath,
+                    record,
+                    recordCount: countConfigTableRecords(sheet, options.headerRow),
+                    row,
+                    sheet: options.sheet,
+                    updated: row !== null,
+                });
+            }
+        );
+
+    configTable
+        .command("delete")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--field <name>", "header field used as the lookup key")
+        .option("--value <json>", "JSON scalar value to match")
+        .option("--text <value>", "plain string value to match")
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    field: string;
+                    headerRow: number;
+                    inPlace?: boolean;
+                    output?: string;
+                    sheet: string;
+                    text?: string;
+                    value?: string;
+                }
+            ) => {
+                const matchValue = resolveMatchValue(options.value, options.text);
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(options.sheet);
+                const row =
+                    findConfigTableRow(sheet, options.headerRow, options.field, matchValue)?.row ??
+                    null;
+
+                if (row !== null) {
+                    sheet.deleteRecord(row, options.headerRow);
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.delete",
+                    deleted: row !== null,
+                    input: inputPath,
+                    matchField: options.field,
+                    matchValue,
+                    output: outputPath,
+                    recordCount: countConfigTableRecords(sheet, options.headerRow),
+                    row,
+                    sheet: options.sheet,
+                });
+            }
+        );
+
+    configTable
+        .command("replace")
+        .description("Replace the full config record set below the header row")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--records <json>", "JSON array of record objects")
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    headerRow: number;
+                    inPlace?: boolean;
+                    output?: string;
+                    records: string;
+                    sheet: string;
+                }
+            ) => {
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(options.sheet);
+                const records = parseJsonCellRecordArray(options.records, "--records");
+                sheet.setRecords(records, options.headerRow);
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.replace",
+                    input: inputPath,
+                    output: outputPath,
+                    recordCount: countConfigTableRecords(sheet, options.headerRow),
+                    sheet: options.sheet,
+                });
+            }
+        );
+
+    configTable
+        .command("sync")
+        .description("Sync config rows with replace, update, or upsert semantics")
+        .argument("<file>", "input xlsx file")
+        .requiredOption("--sheet <name>", "sheet name")
+        .requiredOption("--from-json <file>", "JSON file containing records or a config object")
+        .option(
+            "--field <name>",
+            "header field used as the key when normalizing config objects",
+            "Key"
+        )
+        .option(
+            "--value-field <name>",
+            "header field used for scalar config object values",
+            "Value"
+        )
+        .option("--headers <json>", "JSON array of header strings")
+        .option(
+            "--mode <mode>",
+            "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows",
+            parseConfigTableSyncMode,
+            "replace"
+        )
+        .option("--header-row <row>", "header row used for record mapping", parsePositiveInteger, 1)
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    field: string;
+                    fromJson: string;
+                    headerRow: number;
+                    headers?: string;
+                    inPlace?: boolean;
+                    mode: ConfigTableSyncMode;
+                    output?: string;
+                    sheet: string;
+                    valueField: string;
+                }
+            ) => {
+                const inputPath = resolveFrom(io.cwd, file);
+                const jsonPath = resolveFrom(io.cwd, options.fromJson);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = getOrCreateSheet(workbook, options.sheet);
+                const syncInput = await readConfigTableSyncInput(
+                    jsonPath,
+                    options.field,
+                    options.valueField
+                );
+                const explicitHeaders =
+                    options.headers === undefined
+                        ? undefined
+                        : parseJsonStringArray(options.headers, "--headers");
+                const headers = resolveConfigTableHeaders(
+                    sheet,
+                    options.headerRow,
+                    explicitHeaders ?? syncInput.headers,
+                    syncInput.records
+                );
+
+                sheet.setHeaders(headers, options.headerRow);
+
+                if (options.mode === "replace") {
+                    sheet.setRecords(syncInput.records, options.headerRow);
+                } else {
+                    for (const record of syncInput.records) {
+                        const matchValue = resolveUpsertMatchValue(record, options.field);
+                        const matchedRow =
+                            findConfigTableRow(sheet, options.headerRow, options.field, matchValue)
+                                ?.row ?? null;
+
+                        if (matchedRow === null) {
+                            if (options.mode === "upsert") {
+                                sheet.addRecord(record, options.headerRow);
+                            }
+                        } else if (options.mode === "update") {
+                            sheet.setRecord(matchedRow, record, options.headerRow);
+                        } else {
+                            sheet.replaceRecord(matchedRow, record, options.headerRow);
+                        }
+                    }
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "configTable.sync",
+                    headers,
+                    input: inputPath,
+                    mode: options.mode,
+                    output: outputPath,
+                    recordCount: countConfigTableRecords(sheet, options.headerRow),
+                    sheet: options.sheet,
+                    source: jsonPath,
+                });
+            }
+        );
+
+    const table = program
+        .command("table")
+        .description("Operate on structured sheets with explicit header and data row boundaries");
+
+    table
+        .command("generate-profiles")
+        .argument("[files...]", "input xlsx files")
+        .option("--files-from <file>", "read input xlsx file paths from a newline-delimited file")
+        .option(
+            "--from-dir <directory>",
+            "recursively read input xlsx files from a directory",
+            collectRepeatedStrings
+        )
+        .option(
+            "--ignore <file>",
+            "input xlsx file path to ignore; can be repeated",
+            collectRepeatedStrings
+        )
+        .option(
+            "--sheet-filter <regex>",
+            "regular expression used to select sheet names",
+            parseRegex
+        )
+        .option("--output <file>", "write generated profiles JSON to a file")
+        .action(
+            async (
+                files: string[],
+                options: {
+                    filesFrom?: string;
+                    fromDir?: string[];
+                    ignore?: string[];
+                    output?: string;
+                    sheetFilter?: RegExp;
+                }
+            ) => {
+                const inputPaths = await resolveGenerateProfileInputPaths(io.cwd, files, {
+                    filesFrom: options.filesFrom,
+                    fromDirs: options.fromDir ?? [],
+                    ignoredFiles: options.ignore ?? [],
+                });
+                const result = await generateTableProfiles(inputPaths, {
+                    sheetFilter: options.sheetFilter,
+                });
+                const outputPath = options.output ? resolveFrom(io.cwd, options.output) : null;
+
+                if (outputPath) {
+                    const outputPayload =
+                        result.skipped.length === 0
+                            ? { profiles: result.profiles }
+                            : { profiles: result.profiles, skipped: result.skipped };
+                    await writeFile(outputPath, `${JSON.stringify(outputPayload, null, 2)}\n`);
+                }
+
+                if (outputPath) {
+                    io.stdout(`Generated profile file: ${outputPath}\n`);
+                } else {
+                    writeJson(io.stdout, {
+                        ...result,
+                        output: null,
+                    });
+                }
+            }
+        );
+
+    table
+        .command("inspect")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    profile?: string;
+                    profilesFile?: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const result = await inspectTable(
+                    resolveFrom(io.cwd, file),
+                    context.sheet,
+                    context.headerRow,
+                    context.dataStartRow
+                );
+                writeJson(io.stdout, result);
+            }
+        );
+
+    table
+        .command("list")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    profile?: string;
+                    profilesFile?: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const result = await getStructuredTableRows(
+                    resolveFrom(io.cwd, file),
+                    context.sheet,
+                    context.headerRow,
+                    context.dataStartRow
+                );
+                writeJson(io.stdout, result);
+            }
+        );
+
+    table
+        .command("get")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+        .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    key: string;
+                    keyField: string[];
+                    profile?: string;
+                    profilesFile?: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const result = await getStructuredTableRecord(
+                    resolveFrom(io.cwd, file),
+                    context.sheet,
+                    context.headerRow,
+                    context.dataStartRow,
+                    context.keyFields,
+                    options.key
+                );
+                writeJson(io.stdout, result);
+            }
+        );
+
+    table
+        .command("upsert")
+        .description("Insert by key or replace a matched structured row")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .requiredOption(
+            "--record <json>",
+            "JSON object keyed by field names; omitted fields are cleared on matched rows"
+        )
+        .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    inPlace?: boolean;
+                    keyField: string[];
+                    output?: string;
+                    profile?: string;
+                    profilesFile?: string;
+                    record: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(context.sheet);
+                const record = parseJsonCellRecord(options.record, "--record");
+                const keyFields = resolveTableKeyFields(
+                    sheet,
+                    context.headerRow,
+                    context.keyFields
+                );
+                const keyRecord = pickKeyRecord(record, keyFields);
+                const matchedRow =
+                    findStructuredTableRow(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow,
+                        keyFields,
+                        keyRecord
+                    )?.row ?? null;
+
+                if (matchedRow === null) {
+                    sheet.addRecord(record, context.headerRow);
+                } else {
+                    writeStructuredTableRecord(sheet, context.headerRow, matchedRow, record);
+                }
+
+                const row =
+                    findStructuredTableRow(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow,
+                        keyFields,
+                        keyRecord
+                    )?.row ?? null;
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "table.upsert",
+                    dataStartRow: context.dataStartRow,
+                    headerRow: context.headerRow,
+                    input: inputPath,
+                    inserted: matchedRow === null,
+                    keyFields,
+                    output: outputPath,
+                    record,
+                    recordCount: countStructuredTableRecords(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow
+                    ),
+                    row,
+                    sheet: context.sheet,
+                });
+            }
+        );
+
+    table
+        .command("update")
+        .description("Patch a matched structured row without clearing omitted fields")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+        .requiredOption(
+            "--record <json>",
+            "JSON object keyed by field names; omitted fields are preserved"
+        )
+        .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    inPlace?: boolean;
+                    key: string;
+                    keyField: string[];
+                    output?: string;
+                    profile?: string;
+                    profilesFile?: string;
+                    record: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(context.sheet);
+                const record = parseJsonCellRecord(options.record, "--record");
+                const keyFields = resolveTableKeyFields(
+                    sheet,
+                    context.headerRow,
+                    context.keyFields
+                );
+                const keyRecord = parseTableKey(options.key, keyFields, "--key");
+                const row =
+                    findStructuredTableRow(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow,
+                        keyFields,
+                        keyRecord
+                    )?.row ?? null;
+
+                if (row !== null) {
+                    sheet.setRecord(row, record, context.headerRow);
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "table.update",
+                    dataStartRow: context.dataStartRow,
+                    headerRow: context.headerRow,
+                    input: inputPath,
+                    key: keyRecord,
+                    keyFields,
+                    output: outputPath,
+                    record,
+                    recordCount: countStructuredTableRecords(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow
+                    ),
+                    row,
+                    sheet: context.sheet,
+                    updated: row !== null,
+                });
+            }
+        );
+
+    table
+        .command("delete")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .requiredOption("--key <json>", "JSON scalar or object used to locate the row")
+        .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    headerRow?: number;
+                    inPlace?: boolean;
+                    key: string;
+                    keyField: string[];
+                    output?: string;
+                    profile?: string;
+                    profilesFile?: string;
+                    sheet?: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const inputPath = resolveFrom(io.cwd, file);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(context.sheet);
+                const keyFields = resolveTableKeyFields(
+                    sheet,
+                    context.headerRow,
+                    context.keyFields
+                );
+                const keyRecord = parseTableKey(options.key, keyFields, "--key");
+                const row =
+                    findStructuredTableRow(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow,
+                        keyFields,
+                        keyRecord
+                    )?.row ?? null;
+
+                if (row !== null) {
+                    sheet.deleteRecord(row, context.headerRow);
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "table.delete",
+                    dataStartRow: context.dataStartRow,
+                    deleted: row !== null,
+                    headerRow: context.headerRow,
+                    input: inputPath,
+                    key: keyRecord,
+                    keyFields,
+                    output: outputPath,
+                    recordCount: countStructuredTableRecords(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow
+                    ),
+                    row,
+                    sheet: context.sheet,
+                });
+            }
+        );
+
+    table
+        .command("sync")
+        .description("Sync structured rows with replace, update, or upsert semantics")
+        .argument("<file>", "input xlsx file")
+        .option("--sheet <name>", "sheet name")
+        .option("--header-row <row>", "row number containing field names", parsePositiveInteger)
+        .option("--data-start-row <row>", "first row containing actual data", parsePositiveInteger)
+        .requiredOption("--from-json <file>", "JSON file containing records or a config object")
+        .option("--key-field <name>", "key field name", collectRepeatedStrings, [])
+        .option("--profile <name>", "table profile name")
+        .option("--profiles-file <file>", "JSON file containing table profiles")
+        .option(
+            "--value-field <name>",
+            "field name used when normalizing scalar config objects",
+            "Value"
+        )
+        .option("--headers <json>", "JSON array of header strings")
+        .option(
+            "--mode <mode>",
+            "replace rewrites rows; update patches matched rows; upsert inserts missing rows and replaces matched rows",
+            parseConfigTableSyncMode,
+            "replace"
+        )
+        .option("--output <file>", "output xlsx path")
+        .option("--in-place", "overwrite the input workbook")
+        .action(
+            async (
+                file: string,
+                options: {
+                    dataStartRow?: number;
+                    fromJson: string;
+                    headerRow?: number;
+                    headers?: string;
+                    inPlace?: boolean;
+                    keyField: string[];
+                    mode: ConfigTableSyncMode;
+                    output?: string;
+                    profile?: string;
+                    profilesFile?: string;
+                    sheet?: string;
+                    valueField: string;
+                }
+            ) => {
+                const context = await resolveCliTableCommandContext(io.cwd, options);
+                const inputPath = resolveFrom(io.cwd, file);
+                const jsonPath = resolveFrom(io.cwd, options.fromJson);
+                const outputPath = resolveOutputPath(inputPath, {
+                    inPlace: options.inPlace === true,
+                    output: options.output ? resolveFrom(io.cwd, options.output) : undefined,
+                });
+                const workbook = await Workbook.open(inputPath);
+                const sheet = workbook.getSheet(context.sheet);
+                const syncInput = await readConfigTableSyncInput(
+                    jsonPath,
+                    context.keyFields[0] ?? "Key",
+                    options.valueField
+                );
+                const explicitHeaders =
+                    options.headers === undefined
+                        ? undefined
+                        : parseJsonStringArray(options.headers, "--headers");
+                const headers = resolveConfigTableHeaders(
+                    sheet,
+                    context.headerRow,
+                    explicitHeaders ?? syncInput.headers,
+                    syncInput.records
+                );
+
+                sheet.setHeaders(headers, context.headerRow);
+
+                if (options.mode === "replace") {
+                    writeStructuredTableRecords(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow,
+                        syncInput.records
+                    );
+                } else {
+                    const keyFields = resolveTableKeyFields(
+                        sheet,
+                        context.headerRow,
+                        context.keyFields
+                    );
+                    for (const record of syncInput.records) {
+                        const keyRecord = pickKeyRecord(record, keyFields);
+                        const matchedRow =
+                            findStructuredTableRow(
+                                sheet,
+                                context.headerRow,
+                                context.dataStartRow,
+                                keyFields,
+                                keyRecord
+                            )?.row ?? null;
+
+                        if (matchedRow === null) {
+                            if (options.mode === "upsert") {
+                                sheet.addRecord(record, context.headerRow);
+                            }
+                        } else if (options.mode === "update") {
+                            sheet.setRecord(matchedRow, record, context.headerRow);
+                        } else {
+                            writeStructuredTableRecord(
+                                sheet,
+                                context.headerRow,
+                                matchedRow,
+                                record
+                            );
+                        }
+                    }
+                }
+
+                await workbook.save(outputPath);
+                writeJson(io.stdout, {
+                    action: "table.sync",
+                    dataStartRow: context.dataStartRow,
+                    headerRow: context.headerRow,
+                    input: inputPath,
+                    mode: options.mode,
+                    output: outputPath,
+                    recordCount: countStructuredTableRecords(
+                        sheet,
+                        context.headerRow,
+                        context.dataStartRow
+                    ),
+                    sheet: context.sheet,
+                    source: jsonPath,
+                });
+            }
+        );
 }
 
 function countConfigTableRecords(sheet: WorkbookSheet, headerRow: number): number {
-  return listConfigTableRows(sheet, headerRow).length;
+    return listConfigTableRows(sheet, headerRow).length;
 }
 
 function countStructuredTableRecords(
-  sheet: WorkbookSheet,
-  headerRow: number,
-  dataStartRow: number,
+    sheet: WorkbookSheet,
+    headerRow: number,
+    dataStartRow: number
 ): number {
-  return listStructuredTableRows(sheet, headerRow, dataStartRow).length;
+    return listStructuredTableRows(sheet, headerRow, dataStartRow).length;
 }
 
 function parseConfigTableSyncMode(value: string): ConfigTableSyncMode {
-  if (value === "replace" || value === "update" || value === "upsert") {
-    return value;
-  }
+    if (value === "replace" || value === "update" || value === "upsert") {
+        return value;
+    }
 
-  throw new InvalidArgumentError(`Expected replace, update, or upsert, got: ${value}`);
+    throw new InvalidArgumentError(`Expected replace, update, or upsert, got: ${value}`);
 }
 
 function parseRegex(value: string): RegExp {
-  try {
-    return new RegExp(value);
-  } catch (error) {
-    throw new InvalidArgumentError(`Expected a valid regular expression, got: ${value}; ${formatError(error)}`);
-  }
+    try {
+        return new RegExp(value);
+    } catch (error) {
+        throw new InvalidArgumentError(
+            `Expected a valid regular expression, got: ${value}; ${formatError(error)}`
+        );
+    }
 }
 
 async function resolveGenerateProfileInputPaths(
-  cwd: string,
-  files: string[],
-  options: {
-    filesFrom?: string;
-    fromDirs: string[];
-    ignoredFiles: string[];
-  },
+    cwd: string,
+    files: string[],
+    options: {
+        filesFrom?: string;
+        fromDirs: string[];
+        ignoredFiles: string[];
+    }
 ): Promise<string[]> {
-  const inputFiles = [...files];
+    const inputFiles = [...files];
 
-  if (options.filesFrom) {
-    const fileListPath = resolveFrom(cwd, options.filesFrom);
-    const fileList = await readFile(fileListPath, "utf8");
-    inputFiles.push(...parseNewlineDelimitedPaths(fileList));
-  }
+    if (options.filesFrom) {
+        const fileListPath = resolveFrom(cwd, options.filesFrom);
+        const fileList = await readFile(fileListPath, "utf8");
+        inputFiles.push(...parseNewlineDelimitedPaths(fileList));
+    }
 
-  for (const directory of options.fromDirs) {
-    inputFiles.push(...await collectXlsxFilesFromDirectory(resolveFrom(cwd, directory)));
-  }
+    for (const directory of options.fromDirs) {
+        inputFiles.push(...(await collectXlsxFilesFromDirectory(resolveFrom(cwd, directory))));
+    }
 
-  const ignoredPaths = new Set(options.ignoredFiles.map((file) => resolveFrom(cwd, file)));
-  const inputPaths = inputFiles
-    .map((file) => resolveFrom(cwd, file))
-    .filter((file) => !ignoredPaths.has(file));
+    const ignoredPaths = new Set(options.ignoredFiles.map((file) => resolveFrom(cwd, file)));
+    const inputPaths = inputFiles
+        .map((file) => resolveFrom(cwd, file))
+        .filter((file) => !ignoredPaths.has(file));
 
-  if (inputPaths.length === 0) {
-    throw new Error("Missing input xlsx files; pass files, --files-from, or --from-dir");
-  }
+    if (inputPaths.length === 0) {
+        throw new Error("Missing input xlsx files; pass files, --files-from, or --from-dir");
+    }
 
-  return inputPaths;
+    return inputPaths;
 }
 
 async function collectXlsxFilesFromDirectory(directoryPath: string): Promise<string[]> {
-  const next: string[] = [];
-  const entries = await readdir(directoryPath, { withFileTypes: true });
+    const next: string[] = [];
+    const entries = await readdir(directoryPath, { withFileTypes: true });
 
-  entries.sort((left, right) => left.name.localeCompare(right.name));
+    entries.sort((left, right) => left.name.localeCompare(right.name));
 
-  for (const entry of entries) {
-    const entryPath = join(directoryPath, entry.name);
+    for (const entry of entries) {
+        const entryPath = join(directoryPath, entry.name);
 
-    if (entry.isDirectory()) {
-      next.push(...await collectXlsxFilesFromDirectory(entryPath));
-      continue;
+        if (entry.isDirectory()) {
+            next.push(...(await collectXlsxFilesFromDirectory(entryPath)));
+            continue;
+        }
+
+        if (entry.isFile() && isProfileWorkbookFile(entry.name)) {
+            next.push(entryPath);
+        }
     }
 
-    if (entry.isFile() && isProfileWorkbookFile(entry.name)) {
-      next.push(entryPath);
-    }
-  }
-
-  return next;
+    return next;
 }
 
 function isProfileWorkbookFile(fileName: string): boolean {
-  return extname(fileName).toLowerCase() === ".xlsx" && !fileName.startsWith("~");
+    return extname(fileName).toLowerCase() === ".xlsx" && !fileName.startsWith("~");
 }
 
 function parseNewlineDelimitedPaths(source: string): string[] {
-  return source.split(/\r?\n|\r/u).filter((line) => line.trim().length > 0);
+    return source.split(/\r?\n|\r/u).filter((line) => line.trim().length > 0);
 }
 
 function getOrCreateSheet(workbook: Workbook, sheetName: string) {
-  const existingSheet = workbook.tryGetSheet(sheetName);
-  return existingSheet ?? workbook.addSheet(sheetName);
+    const existingSheet = workbook.tryGetSheet(sheetName);
+    return existingSheet ?? workbook.addSheet(sheetName);
 }
 
 function collectRepeatedStrings(value: string, previous: string[] = []): string[] {
-  return [...previous, value];
+    return [...previous, value];
 }
 
 async function resolveCliTableCommandContext(
-  cwd: string,
-  options: {
-    dataStartRow?: number;
-    headerRow?: number;
-    keyField?: string[];
-    profile?: string;
-    profilesFile?: string;
-    sheet?: string;
-  },
+    cwd: string,
+    options: {
+        dataStartRow?: number;
+        headerRow?: number;
+        keyField?: string[];
+        profile?: string;
+        profilesFile?: string;
+        sheet?: string;
+    }
 ): Promise<TableCommandContext> {
-  return resolveTableCommandContext(
-    options,
-    options.profile ? resolveFrom(cwd, options.profilesFile ?? "table-profiles.json") : undefined,
-  );
+    return resolveTableCommandContext(
+        options,
+        options.profile
+            ? resolveFrom(cwd, options.profilesFile ?? "table-profiles.json")
+            : undefined
+    );
 }
