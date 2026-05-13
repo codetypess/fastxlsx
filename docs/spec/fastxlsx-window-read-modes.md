@@ -15,6 +15,7 @@ That leaves two issues:
 
 - callers cannot use one unified entrypoint to request either read mode
 - the current full and value cache builders duplicate the same worksheet row scan shape even though both need `sheetXml`, row boundaries, and logical value/formula used bounds
+- after a value-mode read, upgrading the same sheet to full-mode still rescans all cells through full snapshot parsing just to recover shared-formula anchors
 
 ## Goals
 
@@ -22,6 +23,7 @@ That leaves two issues:
 - Keep `Sheet.readValueWindow()` and `Workbook.readSheetValueWindow()` as compatibility aliases
 - Extract a shared base per-sheet cache for row boundaries and logical value/formula bounds
 - Preserve the current performance contract where value-mode reads do not hydrate full layout metadata
+- Preserve that lightweight contract when a caller later upgrades from value-mode to full-mode on the same sheet
 
 ## Non-goals
 
@@ -29,7 +31,7 @@ That leaves two issues:
 - Collapsing full and value reads into one always-heavy cache
 - Changing `iterWindowCells()` or `iterValueWindowCells()` in this slice
 - Changing CLI behavior in this slice
-- Eliminating the remaining full-mode-only worksheet scan for shared-formula anchor recovery
+- Reworking the primary full-first `readWindow()` row scan in this slice
 
 ## Public Surface
 
@@ -101,6 +103,7 @@ Read-state behavior:
 - full-mode reads reuse `FullSheetReadCache`
 - full-mode cache references `BaseSheetReadCache` instead of rebuilding its own independent row-boundary store
 - when full-mode is the first caller, the implementation may build base-row metadata in the same pass as shared-formula anchor collection to avoid an unnecessary double scan
+- when value-mode is the first caller, upgrading to full-mode must recover shared-formula anchors with a formula-focused scan that does not rebuild full cell snapshots for non-window cells
 
 ## OOXML Mapping
 
@@ -120,6 +123,21 @@ Full cache continues to additionally read:
 - auto filters
 - column definitions
 - shared-formula anchor definitions
+
+Mixed-mode upgrade constraint:
+
+- shared-formula anchor recovery may rescan worksheet cells
+- that rescan must only extract the shared-formula fields needed for follower translation:
+  - cell address
+  - shared index (`si`)
+  - anchor formula text
+- it must not decode cached values, shared strings, inline strings, or style ids just to build the upgrade cache
+
+Value-mode cold-read constraint:
+
+- base-cache construction is allowed to scan all worksheet cells once
+- that scan should avoid duplicate per-cell XML parsing where possible
+- specifically, value-mode row analysis should not require one helper to parse `<c ...>` metadata and a second helper to rescan the same cell body just to decide whether the cell is logically used
 
 Untouched XML semantics remain unchanged because this feature is read-only.
 
@@ -161,6 +179,7 @@ Add coverage in `test/lossless.test.ts` for:
 - `Sheet.readWindow(..., { mode: "full" })` keeps current layout metadata behavior
 - value-mode unified reads still ignore comment-only bounds while full-mode unified reads still include them
 - repeated mode-mixed reads continue to refresh after writes and structural edits
+- a `readValueWindow()` call followed by `readWindow()` still resolves shared-formula followers correctly
 
 ## Acceptance Criteria
 
@@ -168,4 +187,5 @@ Add coverage in `test/lossless.test.ts` for:
 - existing alias methods remain supported
 - value-mode reads continue to avoid full layout metadata hydration
 - base per-sheet cache is shared between the two read families
+- mixed `value -> full` upgrades do not require rebuilding full cell snapshots for off-window cells solely to recover shared-formula anchors
 - targeted tests pass without changing current full-mode or value-mode semantics

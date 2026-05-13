@@ -23,7 +23,6 @@ import type { Sheet } from "../sheet.js";
 import type { Workbook } from "../workbook.js";
 import {
   buildCellSnapshot,
-  parseCellAddressFast,
   parseCellTagMetadata,
   parseRowTagMetadata,
 } from "../sheet/sheet-index.js";
@@ -40,7 +39,15 @@ import {
 } from "../sheet/sheet-style-xml.js";
 import { assertColumnNumber, assertRowNumber } from "../sheet/sheet-validation.js";
 import { translateFormulaReferences } from "../sheet/sheet-structure.js";
-import { parseAttributes, serializeAttributes, getXmlAttr } from "../utils/xml.js";
+import { decodeXmlText, serializeAttributes, getXmlAttr } from "../utils/xml.js";
+import {
+  cleanTagAttributesSource,
+  isSelfClosingTagSource,
+  isXmlWhitespaceCode,
+  parseCellColumnNumberFast,
+  readXmlAttrFast,
+  scanValueWindowCellFast,
+} from "./workbook-window-read-xml.js";
 
 interface ReadState {
   manifest?: WorkbookManifest;
@@ -94,6 +101,14 @@ interface UsedBounds {
   maxRow: number;
   minColumn: number;
   minRow: number;
+}
+
+interface WindowViewport {
+  clampedEndColumn: number;
+  clampedEndRow: number;
+  clampedRange: string;
+  clampedStartColumn: number;
+  clampedStartRow: number;
 }
 
 interface ScratchCellInfo {
@@ -177,57 +192,42 @@ export function readWorkbookSheetWindow(
   assertSheetWindowReadOptions(options);
 
   const cache = resolveFullSheetReadCache(workbook, sheet);
+  const resolvedWindow = resolveWindowReadBounds(options, cache.usedBounds);
 
-  const requestedRange = formatRangeRef(options.startRow, options.startColumn, options.endRow, options.endColumn);
-  const rowCount = cache.usedBounds?.maxRow ?? 0;
-  const columnCount = cache.usedBounds?.maxColumn ?? 0;
-  const sheetRange = cache.usedBounds
-    ? formatRangeRef(
-        cache.usedBounds.minRow,
-        cache.usedBounds.minColumn,
-        cache.usedBounds.maxRow,
-        cache.usedBounds.maxColumn,
-      )
-    : null;
-
-  if (rowCount === 0 || columnCount === 0) {
-    return buildEmptyWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount, cache);
+  if (!resolvedWindow.viewport) {
+    return buildEmptyWindowSnapshot(
+      sheet.name,
+      resolvedWindow.requestedRange,
+      resolvedWindow.sheetRange,
+      resolvedWindow.rowCount,
+      resolvedWindow.columnCount,
+      cache,
+    );
   }
-
-  if (options.startRow > rowCount || options.startColumn > columnCount) {
-    return buildEmptyWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount, cache);
-  }
-
-  const clampedStartRow = Math.max(1, Math.min(options.startRow, rowCount));
-  const clampedEndRow = Math.max(1, Math.min(options.endRow, rowCount));
-  const clampedStartColumn = Math.max(1, Math.min(options.startColumn, columnCount));
-  const clampedEndColumn = Math.max(1, Math.min(options.endColumn, columnCount));
-  if (clampedStartRow > clampedEndRow || clampedStartColumn > clampedEndColumn) {
-    return buildEmptyWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount, cache);
-  }
+  const viewport = resolvedWindow.viewport;
 
   const alignmentCache = new Map<number, CellStyleAlignment | null>();
   const rowMetadata = collectRowWindowMetadata(
     workbook,
     cache.base.rowInfos,
-    clampedStartRow,
-    clampedEndRow,
+    viewport.clampedStartRow,
+    viewport.clampedEndRow,
     alignmentCache,
   );
   const columnMetadata = collectColumnWindowMetadata(
     workbook,
     cache.columnDefinitions,
-    clampedStartColumn,
-    clampedEndColumn,
+    viewport.clampedStartColumn,
+    viewport.clampedEndColumn,
     alignmentCache,
   );
   const cellResult = readWindowCells(
     workbook,
     cache,
-    clampedStartRow,
-    clampedEndRow,
-    clampedStartColumn,
-    clampedEndColumn,
+    viewport.clampedStartRow,
+    viewport.clampedEndRow,
+    viewport.clampedStartColumn,
+    viewport.clampedEndColumn,
     alignmentCache,
   );
 
@@ -235,25 +235,31 @@ export function readWorkbookSheetWindow(
     autoFilter: cloneAutoFilterDefinition(cache.autoFilter),
     cellAlignments: cellResult.cellAlignments,
     cells: cellResult.cells,
-    clampedRange: formatRangeRef(clampedStartRow, clampedStartColumn, clampedEndRow, clampedEndColumn),
-    comments: filterCommentsInWindow(cache.comments, clampedStartRow, clampedEndRow, clampedStartColumn, clampedEndColumn),
+    clampedRange: viewport.clampedRange,
+    comments: filterCommentsInWindow(
+      cache.comments,
+      viewport.clampedStartRow,
+      viewport.clampedEndRow,
+      viewport.clampedStartColumn,
+      viewport.clampedEndColumn,
+    ),
     columnAlignments: columnMetadata.columnAlignments,
-    columnCount,
+    columnCount: resolvedWindow.columnCount,
     columnStyleIds: columnMetadata.columnStyleIds,
     columnWidths: columnMetadata.columnWidths,
     freezePane: cloneFreezePane(cache.freezePane),
     hiddenColumns: columnMetadata.hiddenColumns,
     hiddenRows: rowMetadata.hiddenRows,
     mergedRanges: cache.mergedRanges
-      .filter((range) => rangesIntersect(range, clampedStartRow, clampedEndRow, clampedStartColumn, clampedEndColumn))
+      .filter((range) => rangesIntersect(range, viewport.clampedStartRow, viewport.clampedEndRow, viewport.clampedStartColumn, viewport.clampedEndColumn))
       .map((range) => range.ref),
-    requestedRange,
+    requestedRange: resolvedWindow.requestedRange,
     rowAlignments: rowMetadata.rowAlignments,
-    rowCount,
+    rowCount: resolvedWindow.rowCount,
     rowHeights: rowMetadata.rowHeights,
     rowStyleIds: rowMetadata.rowStyleIds,
     sheetName: sheet.name,
-    sheetRange,
+    sheetRange: resolvedWindow.sheetRange,
   };
 }
 
@@ -265,25 +271,58 @@ export function readWorkbookSheetValueWindow(
   assertSheetWindowReadOptions(options);
 
   const cache = resolveBaseSheetReadCache(workbook, sheet);
+  const resolvedWindow = resolveWindowReadBounds(options, cache.usedBounds);
 
+  if (!resolvedWindow.viewport) {
+    return buildEmptyValueWindowSnapshot(
+      sheet.name,
+      resolvedWindow.requestedRange,
+      resolvedWindow.sheetRange,
+      resolvedWindow.rowCount,
+      resolvedWindow.columnCount,
+    );
+  }
+  const viewport = resolvedWindow.viewport;
+
+  const cellResult = readValueWindowCells(
+    workbook,
+    cache,
+    viewport.clampedStartRow,
+    viewport.clampedEndRow,
+    viewport.clampedStartColumn,
+    viewport.clampedEndColumn,
+  );
+
+  return {
+    cells: cellResult.cells,
+    clampedRange: viewport.clampedRange,
+    columnCount: resolvedWindow.columnCount,
+    requestedRange: resolvedWindow.requestedRange,
+    rowCount: resolvedWindow.rowCount,
+    sheetName: sheet.name,
+    sheetRange: resolvedWindow.sheetRange,
+  };
+}
+
+function resolveWindowReadBounds(
+  options: SheetWindowReadOptions,
+  usedBounds: UsedBounds | null,
+): {
+  columnCount: number;
+  requestedRange: string;
+  rowCount: number;
+  sheetRange: string | null;
+  viewport: WindowViewport | null;
+} {
   const requestedRange = formatRangeRef(options.startRow, options.startColumn, options.endRow, options.endColumn);
-  const rowCount = cache.usedBounds?.maxRow ?? 0;
-  const columnCount = cache.usedBounds?.maxColumn ?? 0;
-  const sheetRange = cache.usedBounds
-    ? formatRangeRef(
-        cache.usedBounds.minRow,
-        cache.usedBounds.minColumn,
-        cache.usedBounds.maxRow,
-        cache.usedBounds.maxColumn,
-      )
+  const rowCount = usedBounds?.maxRow ?? 0;
+  const columnCount = usedBounds?.maxColumn ?? 0;
+  const sheetRange = usedBounds
+    ? formatRangeRef(usedBounds.minRow, usedBounds.minColumn, usedBounds.maxRow, usedBounds.maxColumn)
     : null;
 
-  if (rowCount === 0 || columnCount === 0) {
-    return buildEmptyValueWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount);
-  }
-
-  if (options.startRow > rowCount || options.startColumn > columnCount) {
-    return buildEmptyValueWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount);
+  if (rowCount === 0 || columnCount === 0 || options.startRow > rowCount || options.startColumn > columnCount) {
+    return { columnCount, requestedRange, rowCount, sheetRange, viewport: null };
   }
 
   const clampedStartRow = Math.max(1, Math.min(options.startRow, rowCount));
@@ -291,26 +330,21 @@ export function readWorkbookSheetValueWindow(
   const clampedStartColumn = Math.max(1, Math.min(options.startColumn, columnCount));
   const clampedEndColumn = Math.max(1, Math.min(options.endColumn, columnCount));
   if (clampedStartRow > clampedEndRow || clampedStartColumn > clampedEndColumn) {
-    return buildEmptyValueWindowSnapshot(sheet.name, requestedRange, sheetRange, rowCount, columnCount);
+    return { columnCount, requestedRange, rowCount, sheetRange, viewport: null };
   }
 
-  const cellResult = readValueWindowCells(
-    workbook,
-    cache,
-    clampedStartRow,
-    clampedEndRow,
-    clampedStartColumn,
-    clampedEndColumn,
-  );
-
   return {
-    cells: cellResult.cells,
-    clampedRange: formatRangeRef(clampedStartRow, clampedStartColumn, clampedEndRow, clampedEndColumn),
     columnCount,
     requestedRange,
     rowCount,
-    sheetName: sheet.name,
     sheetRange,
+    viewport: {
+      clampedEndColumn,
+      clampedEndRow,
+      clampedRange: formatRangeRef(clampedStartRow, clampedStartColumn, clampedEndRow, clampedEndColumn),
+      clampedStartColumn,
+      clampedStartRow,
+    },
   };
 }
 
@@ -349,7 +383,7 @@ function resolveFullSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadC
     sharedFormulaAnchors = built.sharedFormulaAnchors;
     state.baseSheetCaches.set(sheet.path, baseCache);
   } else {
-    sharedFormulaAnchors = collectSharedFormulaAnchors(workbook, baseCache);
+    sharedFormulaAnchors = collectSharedFormulaAnchors(baseCache);
   }
 
   cache = buildFullSheetReadCache(sheet, baseCache, sharedFormulaAnchors);
@@ -517,42 +551,19 @@ function buildBaseSheetRowReadInfo(
   let previousColumnNumber = 0;
   let cellsAreSorted = true;
 
-  while (cellCursor < innerEnd) {
-    const cellStart = sheetXml.indexOf("<c", cellCursor);
-    if (cellStart === -1 || cellStart >= innerEnd) {
-      break;
-    }
-
-    const cellOpenTagEnd = sheetXml.indexOf(">", cellStart + 2);
-    if (cellOpenTagEnd === -1 || cellOpenTagEnd > innerEnd) {
-      break;
-    }
-
-    const cellMetadata = parseCellTagMetadata(sheetXml.slice(cellStart + 2, cellOpenTagEnd));
-    const cellEnd = cellMetadata.selfClosing
-      ? cellOpenTagEnd + 1
-      : sheetXml.indexOf("</c>", cellOpenTagEnd + 1);
-    if (!cellMetadata.addressSource || cellEnd === -1) {
-      cellCursor = cellOpenTagEnd + 1;
-      continue;
-    }
-
-    const { columnNumber } = parseCellAddressFast(cellMetadata.addressSource.toUpperCase());
+  let scannedCell = scanValueWindowCellFast(sheetXml, innerEnd, cellCursor);
+  while (scannedCell) {
     scratchCells.push({
-      columnNumber,
-      logical: hasLogicalValueWindowCellContent(
-        sheetXml,
-        cellMetadata.selfClosing ? cellEnd : cellOpenTagEnd + 1,
-        cellMetadata.selfClosing ? cellEnd : cellEnd,
-        cellMetadata.rawType,
-      ),
+      columnNumber: scannedCell.columnNumber,
+      logical: scannedCell.logical,
     });
 
-    if (columnNumber < previousColumnNumber) {
+    if (scannedCell.columnNumber < previousColumnNumber) {
       cellsAreSorted = false;
     }
-    previousColumnNumber = columnNumber;
-    cellCursor = cellMetadata.selfClosing ? cellEnd : cellEnd + "</c>".length;
+    previousColumnNumber = scannedCell.columnNumber;
+    cellCursor = scannedCell.nextCursor;
+    scannedCell = scanValueWindowCellFast(sheetXml, innerEnd, cellCursor);
   }
 
   if (!cellsAreSorted) {
@@ -618,7 +629,7 @@ function buildSheetRowReadInfo(
       continue;
     }
 
-    const { columnNumber } = parseCellAddressFast(cellMetadata.addressSource.toUpperCase());
+    const columnNumber = parseCellColumnNumberFast(cellMetadata.addressSource);
     const snapshotResult = buildCellSnapshot(
       workbook,
       cellMetadata.rawType,
@@ -670,21 +681,12 @@ function registerSharedFormulaAnchor(
   columnNumber: number,
   sharedFormulaAnchors: Map<string, SharedFormulaAnchor>,
 ): void {
-  if (formulaAttributesSource.length === 0) {
+  const sharedFormula = parseSharedFormulaMetadata(formulaAttributesSource);
+  if (!sharedFormula || snapshot.formula === null || snapshot.formula.length === 0) {
     return;
   }
 
-  const attributes = new Map(parseAttributes(formulaAttributesSource));
-  if (attributes.get("t") !== "shared") {
-    return;
-  }
-
-  const sharedIndex = attributes.get("si");
-  if (!sharedIndex || snapshot.formula === null || snapshot.formula.length === 0) {
-    return;
-  }
-
-  sharedFormulaAnchors.set(sharedIndex, {
+  sharedFormulaAnchors.set(sharedFormula.sharedIndex, {
     columnNumber,
     formula: snapshot.formula,
     rowNumber,
@@ -784,10 +786,7 @@ function mergeUsedBounds(left: UsedBounds | null, right: UsedBounds | null): Use
   };
 }
 
-function collectSharedFormulaAnchors(
-  workbook: Workbook,
-  base: BaseSheetReadCache,
-): Map<string, SharedFormulaAnchor> {
+function collectSharedFormulaAnchors(base: BaseSheetReadCache): Map<string, SharedFormulaAnchor> {
   const sharedFormulaAnchors = new Map<string, SharedFormulaAnchor>();
 
   for (const rowInfo of base.rowInfos) {
@@ -812,28 +811,93 @@ function collectSharedFormulaAnchors(
         continue;
       }
 
-      const { columnNumber } = parseCellAddressFast(cellMetadata.addressSource.toUpperCase());
-      const snapshotResult = buildCellSnapshot(
-        workbook,
-        cellMetadata.rawType,
-        cellMetadata.styleIdText === undefined ? null : Number(cellMetadata.styleIdText),
+      const columnNumber = parseCellColumnNumberFast(cellMetadata.addressSource);
+      const anchor = extractSharedFormulaAnchorFast(
         base.sheetXml,
         cellMetadata.selfClosing ? cellEnd : cellOpenTagEnd + 1,
         cellMetadata.selfClosing ? cellEnd : cellEnd,
       );
-      registerSharedFormulaAnchor(
-        snapshotResult.formulaAttributesSource,
-        snapshotResult.snapshot,
-        rowInfo.rowNumber,
-        columnNumber,
-        sharedFormulaAnchors,
-      );
+      if (anchor) {
+        sharedFormulaAnchors.set(anchor.sharedIndex, {
+          columnNumber,
+          formula: anchor.formula,
+          rowNumber: rowInfo.rowNumber,
+        });
+      }
 
       cellCursor = cellMetadata.selfClosing ? cellEnd : cellEnd + "</c>".length;
     }
   }
 
   return sharedFormulaAnchors;
+}
+
+function parseSharedFormulaMetadata(
+  formulaAttributesSource: string,
+): { hasRef: boolean; sharedIndex: string } | null {
+  if (formulaAttributesSource.length === 0) {
+    return null;
+  }
+
+  if (readXmlAttrFast(formulaAttributesSource, "t") !== "shared") {
+    return null;
+  }
+
+  const sharedIndex = readXmlAttrFast(formulaAttributesSource, "si");
+  if (!sharedIndex) {
+    return null;
+  }
+
+  return {
+    hasRef: readXmlAttrFast(formulaAttributesSource, "ref") !== undefined,
+    sharedIndex,
+  };
+}
+
+function extractSharedFormulaAnchorFast(
+  xml: string,
+  innerStart: number,
+  innerEnd: number,
+): { formula: string; sharedIndex: string } | null {
+  const formulaStart = xml.indexOf("<f", innerStart);
+  if (formulaStart === -1 || formulaStart >= innerEnd) {
+    return null;
+  }
+
+  const nextCode = xml.charCodeAt(formulaStart + 2);
+  if (nextCode !== 62 && nextCode !== 47 && !isXmlWhitespaceCode(nextCode)) {
+    return null;
+  }
+
+  const formulaOpenTagEnd = xml.indexOf(">", formulaStart + 2);
+  if (formulaOpenTagEnd === -1 || formulaOpenTagEnd >= innerEnd) {
+    return null;
+  }
+
+  const formulaTagSource = xml.slice(formulaStart + 2, formulaOpenTagEnd);
+  if (isSelfClosingTagSource(formulaTagSource)) {
+    return null;
+  }
+
+  const sharedFormula = parseSharedFormulaMetadata(cleanTagAttributesSource(formulaTagSource));
+  if (!sharedFormula) {
+    return null;
+  }
+
+  const formulaCloseStart = xml.indexOf("</f>", formulaOpenTagEnd + 1);
+  if (formulaCloseStart === -1 || formulaCloseStart >= innerEnd) {
+    return null;
+  }
+
+  const formulaSource = xml.slice(formulaOpenTagEnd + 1, formulaCloseStart);
+  if (formulaSource.length === 0) {
+    return null;
+  }
+
+  return {
+    formula: decodeXmlText(formulaSource),
+    sharedIndex: sharedFormula.sharedIndex,
+  };
 }
 
 function collectRowWindowMetadata(
@@ -967,7 +1031,7 @@ function readWindowCells(
       }
 
       const address = cellMetadata.addressSource.toUpperCase();
-      const { columnNumber } = parseCellAddressFast(address);
+      const columnNumber = parseCellColumnNumberFast(cellMetadata.addressSource);
       cellCursor = cellMetadata.selfClosing ? cellEnd : cellEnd + "</c>".length;
       if (columnNumber < startColumn || columnNumber > endColumn) {
         continue;
@@ -1034,53 +1098,34 @@ function readValueWindowCells(
     }
 
     let cellCursor = rowInfo.innerStart;
-    while (cellCursor < rowInfo.innerEnd) {
-      const cellStart = cache.sheetXml.indexOf("<c", cellCursor);
-      if (cellStart === -1 || cellStart >= rowInfo.innerEnd) {
-        break;
-      }
-
-      const cellOpenTagEnd = cache.sheetXml.indexOf(">", cellStart + 2);
-      if (cellOpenTagEnd === -1 || cellOpenTagEnd > rowInfo.innerEnd) {
-        break;
-      }
-
-      const cellMetadata = parseCellTagMetadata(cache.sheetXml.slice(cellStart + 2, cellOpenTagEnd));
-      const cellEnd = cellMetadata.selfClosing
-        ? cellOpenTagEnd + 1
-        : cache.sheetXml.indexOf("</c>", cellOpenTagEnd + 1);
-      if (!cellMetadata.addressSource || cellEnd === -1) {
-        cellCursor = cellOpenTagEnd + 1;
+    let scannedCell = scanValueWindowCellFast(cache.sheetXml, rowInfo.innerEnd, cellCursor);
+    while (scannedCell) {
+      cellCursor = scannedCell.nextCursor;
+      if (scannedCell.columnNumber < startColumn || scannedCell.columnNumber > endColumn) {
+        scannedCell = scanValueWindowCellFast(cache.sheetXml, rowInfo.innerEnd, cellCursor);
         continue;
       }
 
-      const address = cellMetadata.addressSource.toUpperCase();
-      const { columnNumber } = parseCellAddressFast(address);
-      cellCursor = cellMetadata.selfClosing ? cellEnd : cellEnd + "</c>".length;
-      if (columnNumber < startColumn || columnNumber > endColumn) {
-        continue;
-      }
-
-      const innerStart = cellMetadata.selfClosing ? cellEnd : cellOpenTagEnd + 1;
-      const innerEnd = cellMetadata.selfClosing ? cellEnd : cellEnd;
-      if (!hasLogicalValueWindowCellContent(cache.sheetXml, innerStart, innerEnd, cellMetadata.rawType)) {
+      if (!scannedCell.logical) {
+        scannedCell = scanValueWindowCellFast(cache.sheetXml, rowInfo.innerEnd, cellCursor);
         continue;
       }
 
       const snapshotResult = buildCellSnapshot(
         workbook,
-        cellMetadata.rawType,
+        scannedCell.rawType,
         null,
         cache.sheetXml,
-        innerStart,
-        innerEnd,
+        scannedCell.innerStart,
+        scannedCell.innerEnd,
       );
       cells.push({
-        address,
-        columnNumber,
+        address: scannedCell.addressSource.toUpperCase(),
+        columnNumber: scannedCell.columnNumber,
         rowNumber: rowInfo.rowNumber,
         value: snapshotResult.snapshot.value,
       });
+      scannedCell = scanValueWindowCellFast(cache.sheetXml, rowInfo.innerEnd, cellCursor);
     }
   }
 
@@ -1094,21 +1139,12 @@ function resolveSharedFormulaSnapshot(
   columnNumber: number,
   sharedFormulaAnchors: Map<string, SharedFormulaAnchor>,
 ): CellSnapshot {
-  if (formulaAttributesSource.length === 0) {
+  const sharedFormula = parseSharedFormulaMetadata(formulaAttributesSource);
+  if (!sharedFormula || sharedFormula.hasRef || (snapshot.formula !== null && snapshot.formula.length > 0)) {
     return snapshot;
   }
 
-  const attributes = new Map(parseAttributes(formulaAttributesSource));
-  if (attributes.get("t") !== "shared") {
-    return snapshot;
-  }
-
-  const sharedIndex = attributes.get("si");
-  if (!sharedIndex || attributes.has("ref") || (snapshot.formula !== null && snapshot.formula.length > 0)) {
-    return snapshot;
-  }
-
-  const anchor = sharedFormulaAnchors.get(sharedIndex);
+  const anchor = sharedFormulaAnchors.get(sharedFormula.sharedIndex);
   if (!anchor) {
     return snapshot;
   }
@@ -1190,52 +1226,6 @@ function assertSheetWindowReadOptions(options: SheetWindowReadOptions): void {
 
 function isLogicalCellEntry(cell: Pick<CellSnapshot, "formula" | "value">): boolean {
   return cell.formula !== null || cell.value !== null;
-}
-
-function hasLogicalValueWindowCellContent(
-  xml: string,
-  start: number,
-  end: number,
-  rawType: string | null,
-): boolean {
-  let cursor = start;
-
-  while (cursor < end) {
-    const tagStart = xml.indexOf("<", cursor);
-    if (tagStart === -1 || tagStart >= end) {
-      break;
-    }
-
-    const nextCode = xml.charCodeAt(tagStart + 1);
-    if (nextCode === 47 || nextCode === 33 || nextCode === 63) {
-      cursor = tagStart + 1;
-      continue;
-    }
-
-    const tagOpenEnd = xml.indexOf(">", tagStart + 1);
-    if (tagOpenEnd === -1 || tagOpenEnd >= end) {
-      break;
-    }
-
-    const nameStart = tagStart + 1;
-    let nameEnd = nameStart;
-    while (nameEnd < tagOpenEnd) {
-      const code = xml.charCodeAt(nameEnd);
-      if (code === 47 || code === 62 || isXmlWhitespaceCode(code)) {
-        break;
-      }
-      nameEnd += 1;
-    }
-
-    const tagName = xml.slice(nameStart, nameEnd);
-    if (tagName === "f" || tagName === "v" || (rawType === "inlineStr" && tagName === "is")) {
-      return true;
-    }
-
-    cursor = tagOpenEnd + 1;
-  }
-
-  return false;
 }
 
 function analyzeValueScratchCells(cells: ValueScratchCellInfo[]): { maxColumnNumber: number; used: boolean } {
@@ -1428,8 +1418,4 @@ function parseColumnDefinitionWidth(attributes: Array<[string, string]>): number
 
   const width = Number(widthText);
   return Number.isFinite(width) ? width : null;
-}
-
-function isXmlWhitespaceCode(code: number): boolean {
-  return code === 9 || code === 10 || code === 13 || code === 32;
 }
