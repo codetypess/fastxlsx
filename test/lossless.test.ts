@@ -2789,6 +2789,7 @@ test("row layout APIs read and write hidden and height attributes", async () => 
 
   assert.equal(sheet.getRowHidden(1), true);
   assert.equal(sheet.getRowHeight(1), 25);
+  assert.deepEqual(sheet.getRowHeights(), { "1": 25 });
   assert.equal(sheet.getRowHidden(2), false);
   assert.equal(sheet.getRowHeight(2), null);
 
@@ -2801,6 +2802,7 @@ test("row layout APIs read and write hidden and height attributes", async () => 
   assert.equal(sheet.getRowHeight(1), null);
   assert.equal(sheet.getRowHidden(2), true);
   assert.equal(sheet.getRowHeight(3), 30);
+  assert.deepEqual(sheet.getRowHeights(), { "3": 30 });
 
   const sheetXml = entryText(workbook.toEntries(), "xl/worksheets/sheet1.xml");
   assert.match(sheetXml, /<row r="1">\s*<c r="A1" t="inlineStr"><is><t>Hello<\/t><\/is><\/c>\s*<\/row>/);
@@ -3044,6 +3046,7 @@ test("column layout APIs read and write hidden and width attributes", async () =
   const sheet = workbook.getSheet("Sheet1");
 
   assert.equal(sheet.getColumnWidth("A"), 18.5);
+  assert.deepEqual(sheet.getColumnWidths(), { A: 18.5 });
   assert.equal(sheet.getColumnWidth("B"), null);
   assert.equal(sheet.getColumnHidden("C"), true);
   assert.equal(sheet.getColumnHidden("D"), false);
@@ -3055,6 +3058,7 @@ test("column layout APIs read and write hidden and width attributes", async () =
 
   assert.equal(sheet.getColumnWidth("A"), null);
   assert.equal(sheet.getColumnWidth("B"), 24);
+  assert.deepEqual(sheet.getColumnWidths(), { B: 24 });
   assert.equal(sheet.getColumnHidden("C"), false);
   assert.equal(sheet.getColumnHidden("D"), true);
 

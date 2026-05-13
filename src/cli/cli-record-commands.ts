@@ -206,8 +206,8 @@ export function registerRecordCommands(
     .command("get")
     .argument("<file>", "input xlsx file")
     .requiredOption("--sheet <name>", "sheet name")
-    .option("--columns <json>", "JSON array of column labels to inspect")
-    .option("--rows <json>", "JSON array of row numbers to inspect")
+    .option("--columns <json>", "JSON array of column labels to inspect; defaults to all explicit column widths")
+    .option("--rows <json>", "JSON array of row numbers to inspect; defaults to all explicit row heights")
     .action(
       async (
         file: string,
@@ -219,16 +219,22 @@ export function registerRecordCommands(
       ) => {
         const workbook = await Workbook.open(resolveFrom(io.cwd, file));
         const sheet = workbook.getSheet(options.sheet);
-        const columns = options.columns ? parseJsonStringArray(options.columns, "--columns") : [];
-        const rows = options.rows ? parseJsonNumberArray(options.rows, "--rows") : [];
+        const columns = options.columns === undefined ? undefined : parseJsonStringArray(options.columns, "--columns");
+        const rows = options.rows === undefined ? undefined : parseJsonNumberArray(options.rows, "--rows");
 
         writeJson(io.stdout, {
           action: "sheet.layout.get",
-          columnWidths: Object.fromEntries(columns.map((column) => [column, sheet.getColumnWidth(column)])),
+          columnWidths:
+            columns === undefined
+              ? sheet.getColumnWidths()
+              : Object.fromEntries(columns.map((column) => [column, sheet.getColumnWidth(column)])),
           freezePane: sheet.getFreezePane(),
           printArea: sheet.getPrintArea(),
           printTitles: sheet.getPrintTitles(),
-          rowHeights: Object.fromEntries(rows.map((rowNumber) => [String(rowNumber), sheet.getRowHeight(rowNumber)])),
+          rowHeights:
+            rows === undefined
+              ? sheet.getRowHeights()
+              : Object.fromEntries(rows.map((rowNumber) => [String(rowNumber), sheet.getRowHeight(rowNumber)])),
           sheet: options.sheet,
         });
       },

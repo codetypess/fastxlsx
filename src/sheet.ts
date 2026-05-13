@@ -96,6 +96,7 @@ import {
   buildEmptyStyledRowXml,
   buildStyledRowXml,
   buildUpdatedRowXml,
+  parseColumnDefinitions,
   parseColumnHidden,
   parseColumnStyleId,
   parseColumnWidth,
@@ -507,6 +508,31 @@ export class Sheet {
   }
 
   /**
+   * Reads all explicit column widths keyed by column label.
+   */
+  getColumnWidths(): Record<string, number> {
+    const widths: Record<string, number> = {};
+
+    for (const definition of parseColumnDefinitions(this.getSheetIndex().xml)) {
+      const widthSource = definition.attributes.find(([name]) => name === "width")?.[1];
+      const parsedWidth = widthSource === undefined ? null : Number(widthSource);
+      const width = parsedWidth !== null && Number.isFinite(parsedWidth) ? parsedWidth : null;
+
+      for (let columnNumber = definition.min; columnNumber <= definition.max; columnNumber += 1) {
+        const columnLabel = numberToColumnLabel(columnNumber);
+        if (width === null) {
+          delete widths[columnLabel];
+          continue;
+        }
+
+        widths[columnLabel] = width;
+      }
+    }
+
+    return widths;
+  }
+
+  /**
    * Copies the style id from one cell to another without changing the value.
    *
    * Numeric row and column arguments are 1-based.
@@ -859,6 +885,22 @@ export class Sheet {
   getRowHeight(rowNumber: number): number | null {
     assertRowNumber(rowNumber);
     return parseRowHeight(this.getSheetIndex().rows.get(rowNumber)?.attributesSource);
+  }
+
+  /**
+   * Reads all explicit row heights keyed by row number string.
+   */
+  getRowHeights(): Record<string, number> {
+    const heights: Record<string, number> = {};
+
+    for (const [rowNumber, row] of this.getSheetIndex().rows) {
+      const height = parseRowHeight(row.attributesSource);
+      if (height !== null) {
+        heights[String(rowNumber)] = height;
+      }
+    }
+
+    return heights;
   }
 
   /**

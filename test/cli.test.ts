@@ -1244,6 +1244,20 @@ test("workflow-oriented sheet layout command updates widths, heights, freeze, an
       outputPath,
       "--sheet",
       "Sheet1",
+    ]);
+    assert.equal(result.exitCode, 0);
+    const fullLayout = JSON.parse(result.stdout);
+    assert.deepEqual(fullLayout.columnWidths, { A: 12, B: 24 });
+    assert.deepEqual(fullLayout.rowHeights, { "1": 22 });
+    assert.equal(fullLayout.printArea, "A1:B20");
+
+    result = await runCliCapture([
+      "sheet",
+      "layout",
+      "get",
+      outputPath,
+      "--sheet",
+      "Sheet1",
       "--columns",
       '["A","B"]',
       "--rows",
