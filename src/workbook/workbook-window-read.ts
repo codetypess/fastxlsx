@@ -111,6 +111,11 @@ interface WindowViewport {
     clampedStartRow: number;
 }
 
+interface RowInfoWindow {
+    endExclusiveIndex: number;
+    startIndex: number;
+}
+
 interface ScratchCellInfo {
     columnNumber: number;
     snapshot: CellSnapshot;
@@ -205,13 +210,17 @@ export function readWorkbookSheetWindow(
         );
     }
     const viewport = resolvedWindow.viewport;
+    const rowWindow = resolveRowInfoWindow(
+        cache.base.rowInfos,
+        viewport.clampedStartRow,
+        viewport.clampedEndRow
+    );
 
     const alignmentCache = new Map<number, CellStyleAlignment | null>();
     const rowMetadata = collectRowWindowMetadata(
         workbook,
         cache.base.rowInfos,
-        viewport.clampedStartRow,
-        viewport.clampedEndRow,
+        rowWindow,
         alignmentCache
     );
     const columnMetadata = collectColumnWindowMetadata(
@@ -224,8 +233,7 @@ export function readWorkbookSheetWindow(
     const cellResult = readWindowCells(
         workbook,
         cache,
-        viewport.clampedStartRow,
-        viewport.clampedEndRow,
+        rowWindow,
         viewport.clampedStartColumn,
         viewport.clampedEndColumn,
         alignmentCache
@@ -291,12 +299,16 @@ export function readWorkbookSheetValueWindow(
         );
     }
     const viewport = resolvedWindow.viewport;
+    const rowWindow = resolveRowInfoWindow(
+        cache.rowInfos,
+        viewport.clampedStartRow,
+        viewport.clampedEndRow
+    );
 
     const cellResult = readValueWindowCells(
         workbook,
         cache,
-        viewport.clampedStartRow,
-        viewport.clampedEndRow,
+        rowWindow,
         viewport.clampedStartColumn,
         viewport.clampedEndColumn
     );
@@ -819,6 +831,49 @@ function mergeUsedBounds(left: UsedBounds | null, right: UsedBounds | null): Use
     };
 }
 
+function resolveRowInfoWindow(
+    rowInfos: SheetRowReadInfo[],
+    startRow: number,
+    endRow: number
+): RowInfoWindow {
+    return {
+        endExclusiveIndex: findFirstRowInfoIndexAfter(rowInfos, endRow),
+        startIndex: findFirstRowInfoIndexAtOrAfter(rowInfos, startRow),
+    };
+}
+
+function findFirstRowInfoIndexAtOrAfter(rowInfos: SheetRowReadInfo[], targetRow: number): number {
+    let low = 0;
+    let high = rowInfos.length;
+
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (rowInfos[mid]!.rowNumber < targetRow) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    return low;
+}
+
+function findFirstRowInfoIndexAfter(rowInfos: SheetRowReadInfo[], targetRow: number): number {
+    let low = 0;
+    let high = rowInfos.length;
+
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (rowInfos[mid]!.rowNumber <= targetRow) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    return low;
+}
+
 function collectSharedFormulaAnchors(base: BaseSheetReadCache): Map<string, SharedFormulaAnchor> {
     const sharedFormulaAnchors = new Map<string, SharedFormulaAnchor>();
 
@@ -938,8 +993,7 @@ function extractSharedFormulaAnchorFast(
 function collectRowWindowMetadata(
     workbook: Workbook,
     rowInfos: SheetRowReadInfo[],
-    startRow: number,
-    endRow: number,
+    rowWindow: RowInfoWindow,
     alignmentCache: Map<number, CellStyleAlignment | null>
 ): RowWindowMetadata {
     const hiddenRows: number[] = [];
@@ -947,13 +1001,8 @@ function collectRowWindowMetadata(
     const rowHeights: Record<string, number> = {};
     const rowStyleIds: Record<string, number> = {};
 
-    for (const rowInfo of rowInfos) {
-        if (rowInfo.rowNumber < startRow) {
-            continue;
-        }
-        if (rowInfo.rowNumber > endRow) {
-            break;
-        }
+    for (let index = rowWindow.startIndex; index < rowWindow.endExclusiveIndex; index += 1) {
+        const rowInfo = rowInfos[index]!;
 
         const styleId = parseRowStyleId(rowInfo.attributesSource);
         if (styleId !== null) {
@@ -988,22 +1037,35 @@ function collectColumnWindowMetadata(
     const columnStyleIds: Record<string, number> = {};
     const columnWidths: Record<string, number> = {};
     const hiddenColumns: string[] = [];
+    const windowSize = endColumn - startColumn + 1;
+    const styleIds = new Array<number | null>(windowSize).fill(null);
+    const widths = new Array<number | null>(windowSize).fill(null);
+    const hiddenStates = new Array<boolean>(windowSize).fill(false);
 
-    for (let columnNumber = startColumn; columnNumber <= endColumn; columnNumber += 1) {
-        let styleId: number | null = null;
-        let width: number | null = null;
-        let hidden = false;
-
-        for (const definition of columnDefinitions) {
-            if (columnNumber < definition.min || columnNumber > definition.max) {
-                continue;
-            }
-
-            styleId = definition.styleId;
-            width = definition.width;
-            hidden = definition.hidden;
+    for (const definition of columnDefinitions) {
+        const clampedStartColumn = Math.max(definition.min, startColumn);
+        const clampedEndColumn = Math.min(definition.max, endColumn);
+        if (clampedStartColumn > clampedEndColumn) {
+            continue;
         }
 
+        for (
+            let columnNumber = clampedStartColumn;
+            columnNumber <= clampedEndColumn;
+            columnNumber += 1
+        ) {
+            const offset = columnNumber - startColumn;
+            styleIds[offset] = definition.styleId;
+            widths[offset] = definition.width;
+            hiddenStates[offset] = definition.hidden;
+        }
+    }
+
+    for (let columnNumber = startColumn; columnNumber <= endColumn; columnNumber += 1) {
+        const offset = columnNumber - startColumn;
+        const styleId = styleIds[offset];
+        const width = widths[offset];
+        const hidden = hiddenStates[offset] ?? false;
         const columnLabel = numberToColumnLabel(columnNumber);
         if (styleId !== null) {
             columnStyleIds[columnLabel] = styleId;
@@ -1026,8 +1088,7 @@ function collectColumnWindowMetadata(
 function readWindowCells(
     workbook: Workbook,
     cache: SheetReadCache,
-    startRow: number,
-    endRow: number,
+    rowWindow: RowInfoWindow,
     startColumn: number,
     endColumn: number,
     alignmentCache: Map<number, CellStyleAlignment | null>
@@ -1036,12 +1097,14 @@ function readWindowCells(
     const cells: SheetWindowCell[] = [];
     const base = cache.base;
 
-    for (const rowInfo of base.rowInfos) {
-        if (rowInfo.rowNumber < startRow) {
+    for (let index = rowWindow.startIndex; index < rowWindow.endExclusiveIndex; index += 1) {
+        const rowInfo = base.rowInfos[index]!;
+        if (
+            rowInfo.maxColumnNumber === 0 ||
+            rowInfo.maxColumnNumber < startColumn ||
+            rowInfo.minColumnNumber > endColumn
+        ) {
             continue;
-        }
-        if (rowInfo.rowNumber > endRow) {
-            break;
         }
 
         let cellCursor = rowInfo.innerStart;
@@ -1119,19 +1182,20 @@ function readWindowCells(
 function readValueWindowCells(
     workbook: Workbook,
     cache: BaseSheetReadCache,
-    startRow: number,
-    endRow: number,
+    rowWindow: RowInfoWindow,
     startColumn: number,
     endColumn: number
 ): ValueCellWindowReadResult {
     const cells: SheetValueWindowCell[] = [];
 
-    for (const rowInfo of cache.rowInfos) {
-        if (rowInfo.rowNumber < startRow) {
+    for (let index = rowWindow.startIndex; index < rowWindow.endExclusiveIndex; index += 1) {
+        const rowInfo = cache.rowInfos[index]!;
+        if (
+            rowInfo.maxColumnNumber === 0 ||
+            rowInfo.maxColumnNumber < startColumn ||
+            rowInfo.minColumnNumber > endColumn
+        ) {
             continue;
-        }
-        if (rowInfo.rowNumber > endRow) {
-            break;
         }
 
         let cellCursor = rowInfo.innerStart;

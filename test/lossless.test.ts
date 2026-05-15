@@ -677,6 +677,89 @@ test("sheet windows refresh after structural edits", () => {
     assert.equal(after.cells.find((cell) => cell.address === "C2")?.displayValue, "Tail");
 });
 
+test("sheet windows read deep row windows with stable metadata", () => {
+    const workbook = Workbook.create("Sheet1");
+    const sheet = workbook.getSheet("Sheet1");
+
+    sheet.setCell("A1", "Top");
+    sheet.setCell("B5000", "Mid");
+    sheet.setCell("C10000", "Later");
+    sheet.setFormula("D20000", "1+1", { cachedValue: 2 });
+    const styleId = sheet.setAlignment("D20000", { vertical: "center" });
+    sheet.setRowStyleId(20000, styleId);
+    sheet.setRowHeight(20000, 30);
+    sheet.setRowHidden(20000, true);
+
+    const window = sheet.readWindow({
+        startColumn: 1,
+        startRow: 19990,
+        endColumn: 4,
+        endRow: 20010,
+    });
+
+    assert.equal(window.sheetRange, "A1:D20000");
+    assert.equal(window.clampedRange, "A19990:D20000");
+    assert.deepEqual(window.rowStyleIds, { "20000": styleId });
+    assert.deepEqual(window.rowHeights, { "20000": 30 });
+    assert.deepEqual(window.hiddenRows, [20000]);
+    assert.deepEqual(window.rowAlignments, { "20000": { vertical: "center" } });
+    assert.equal(window.cells.length, 1);
+    assert.equal(window.cells[0]?.address, "D20000");
+    assert.equal(window.cells[0]?.formula, "1+1");
+    assert.equal(window.cells[0]?.displayValue, "2");
+
+    const valueWindow = sheet.readValueWindow({
+        startColumn: 1,
+        startRow: 19990,
+        endColumn: 4,
+        endRow: 20010,
+    });
+    assert.equal(valueWindow.clampedRange, "A19990:D20000");
+    assert.deepEqual(valueWindow.cells, [
+        { address: "D20000", columnNumber: 4, rowNumber: 20000, value: 2 },
+    ]);
+});
+
+test("sheet windows stay stable across overlapping deep window reads", () => {
+    const workbook = Workbook.create("Sheet1");
+    const sheet = workbook.getSheet("Sheet1");
+    const rows = [8000, 8040, 8060, 8080, 8100, 8140];
+
+    for (const rowNumber of rows) {
+        sheet.setCell(`B${rowNumber}`, `R${rowNumber}`);
+    }
+
+    const requests = [
+        { endRow: 8060, expectedRows: [8000, 8040, 8060], startRow: 8000 },
+        { endRow: 8100, expectedRows: [8040, 8060, 8080, 8100], startRow: 8040 },
+        { endRow: 8140, expectedRows: [8080, 8100, 8140], startRow: 8080 },
+    ];
+
+    for (const request of requests) {
+        const window = sheet.readWindow({
+            startColumn: 2,
+            startRow: request.startRow,
+            endColumn: 2,
+            endRow: request.endRow,
+        });
+        assert.deepEqual(
+            window.cells.map((cell) => cell.address),
+            request.expectedRows.map((rowNumber) => `B${rowNumber}`)
+        );
+
+        const valueWindow = sheet.readValueWindow({
+            startColumn: 2,
+            startRow: request.startRow,
+            endColumn: 2,
+            endRow: request.endRow,
+        });
+        assert.deepEqual(
+            valueWindow.cells.map((cell) => cell.address),
+            request.expectedRows.map((rowNumber) => `B${rowNumber}`)
+        );
+    }
+});
+
 test("workbook supports ArrayBuffer open flows", async () => {
     const fixtureDir = resolve("test/fixtures/lossless-source");
     const zipped = Workbook.fromEntries(await loadFixtureEntries(fixtureDir)).toUint8Array();
