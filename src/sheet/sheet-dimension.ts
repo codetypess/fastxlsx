@@ -4,7 +4,7 @@ import { formatRangeRef } from "./sheet-address.js";
 import { getXmlTagInnerStart, replaceXmlTagSource } from "./sheet-xml.js";
 import { findFirstXmlTag } from "../utils/xml-read.js";
 
-export function updateDimensionRef(sheetIndex: SheetIndex): string {
+export function updateDimensionRef(sheetIndex: Pick<SheetIndex, "xml" | "usedBounds">): string {
     const usedRange = formatUsedRangeBounds(sheetIndex.usedBounds);
     const dimensionTag = findFirstXmlTag(sheetIndex.xml, "dimension");
 

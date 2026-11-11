@@ -6,6 +6,11 @@ Use [../spec-driven-development.md](../spec-driven-development.md) as the reposi
 
 Current specs:
 
+- [mutation-read-model-reuse.md](mutation-read-model-reuse.md)
+
+- [comment-read-and-zip-throughput.md](comment-read-and-zip-throughput.md)
+
+- [structural-save-performance.md](structural-save-performance.md)
 - [auto-filter.md](auto-filter.md)
 - [auto-filter-checklist.md](auto-filter-checklist.md)
 - [fastxlsx-load-performance.md](fastxlsx-load-performance.md)

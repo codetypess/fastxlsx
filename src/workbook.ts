@@ -1,3 +1,4 @@
+import { invalidatePreparedSheetReads } from "./workbook/workbook-mutation-read.js";
 import type {
     ArchiveEntry,
     CellBorderColor,
@@ -201,6 +202,9 @@ export class Workbook {
     private readonly entryOrder: string[];
     private readonly entries: Map<string, Uint8Array>;
     private batchDepth = 0;
+    private readRevision = 0;
+    private sharedReadRevision = 0;
+    private readonly sheetReadRevisions = new Map<string, number>();
     private readonly batchedSheets = new Set<Sheet>();
     private workbookContext?: WorkbookContext;
     private sharedStringsCache?: string[];
@@ -499,6 +503,21 @@ export class Workbook {
             context.sheets.length
         );
         return context.sheets[activeSheetIndex] ?? context.sheets[0]!;
+    }
+
+    /**
+     * Opaque sheet-read cache identity, scoped to this Workbook instance.
+     * Finalizes pending writes. Non-worksheet package changes conservatively
+     * invalidate every sheet; the token is not an edit count or a file hash.
+     */
+    getSheetReadVersion(sheetName: string): string {
+        this.flushBatchedSheets();
+        const sheet = this.getSheet(sheetName);
+        return JSON.stringify([
+            sheet.path,
+            this.sheetReadRevisions.get(sheet.path) ?? 0,
+            this.sharedReadRevision,
+        ]);
     }
 
     /**
@@ -1418,7 +1437,23 @@ export class Workbook {
         return XML_DECODER.decode(entry);
     }
 
+    private invalidateEntryReadState(path: string): void {
+        this.readRevision += 1;
+        const context = this.workbookContext;
+        if (context?.sheets.some((sheet) => sheet.path === path)) {
+            this.sheetReadRevisions.set(path, this.readRevision);
+        } else {
+            this.sharedReadRevision = this.readRevision;
+        }
+        invalidatePreparedSheetReads(
+            this,
+            path,
+            !context || shouldResetSharedStringsCache(context, path) || path.endsWith(".rels")
+        );
+    }
+
     writeEntryText(path: string, text: string): void {
+        this.invalidateEntryReadState(path);
         if (!this.entries.has(path)) {
             this.entryOrder.push(path);
         }
@@ -1444,6 +1479,7 @@ export class Workbook {
             return;
         }
 
+        this.invalidateEntryReadState(path);
         removeEntryOrderPath(this.entryOrder, path);
 
         if (shouldResetSharedStringsCache(this.workbookContext, path)) {

@@ -277,6 +277,12 @@ npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final s
 
 这样就更容易通过“解压后内容一致”的验收标准。
 
+## 缓存工作表读取结果
+
+`workbook.getSheetReadVersion(sheetName)` 会先完成待处理的批量写入，再返回不透明的工作表读取版本。同一个 Workbook 实例内，版本未变时可以复用该表的完整读取结果，包括布局和批注。工作表写入使该表版本失效；样式、共享字符串、关系、工作簿元数据等其他包条目的写入或删除会保守地使所有表版本失效。版本不是文件哈希，不能跨 Workbook 实例比较。
+
+批量写入完成后，完整窗口读取可复用写入阶段已经解析的单元格。待处理修改触及已有共享公式单元格时回退到 XML 读取；其他修改可复用已解析的共享公式从属单元格。值、公式和序列化语义保持一致，返回的窗口数据与内部缓存相互独立。
+
 ## 当前能力
 
 - `Workbook.open(path)`
@@ -294,6 +300,7 @@ npm run cli -- sheet comment set out.xlsx --sheet Data --cell C2 --text "Final s
 - `workbook.tryGetSheet(name)`
 - `workbook.getActiveSheet()`
 - `workbook.batch(applyChanges)`
+- `workbook.getSheetReadVersion(sheetName)`
 - `workbook.getNumberFormat(numFmtId)`
 - `workbook.updateNumberFormat(numFmtId, formatCode)`
 - `workbook.cloneNumberFormat(numFmtId, formatCode?)`

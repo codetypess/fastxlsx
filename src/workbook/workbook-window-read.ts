@@ -1,3 +1,5 @@
+// Native blank-cell alignment support: mutation-read-model-v1.
+import { getPreparedSheetReadModel, type PreparedReadCell } from "./workbook-mutation-read.js";
 import type {
     AutoFilterColumn,
     AutoFilterCondition,
@@ -73,6 +75,7 @@ interface SheetReadCache {
 }
 
 interface BaseSheetReadCache {
+    preparedCells?: Map<number, PreparedReadCell[]>;
     rowInfos: SheetRowReadInfo[];
     sheetXml: string;
     usedBounds: UsedBounds | null;
@@ -84,6 +87,7 @@ interface SheetRowReadInfo {
     innerStart: number;
     maxColumnNumber: number;
     minColumnNumber: number;
+    physicalMaxColumnNumber?: number;
     rowNumber: number;
     used: boolean;
 }
@@ -198,16 +202,29 @@ export function readWorkbookSheetWindow(
 
     const cache = resolveFullSheetReadCache(workbook, sheet);
     const resolvedWindow = resolveWindowReadBounds(options, cache.usedBounds);
+    const alignmentCache = new Map<number, CellStyleAlignment | null>();
+    const cellRows = resolveRowInfoWindow(cache.base.rowInfos, options.startRow, options.endRow);
+    const cellResult = readWindowCells(
+        workbook,
+        cache,
+        cellRows,
+        options.startColumn,
+        options.endColumn,
+        alignmentCache
+    );
 
     if (!resolvedWindow.viewport) {
-        return buildEmptyWindowSnapshot(
-            sheet.name,
-            resolvedWindow.requestedRange,
-            resolvedWindow.sheetRange,
-            resolvedWindow.rowCount,
-            resolvedWindow.columnCount,
-            cache
-        );
+        return {
+            ...buildEmptyWindowSnapshot(
+                sheet.name,
+                resolvedWindow.requestedRange,
+                resolvedWindow.sheetRange,
+                resolvedWindow.rowCount,
+                resolvedWindow.columnCount,
+                cache
+            ),
+            cellAlignments: cellResult.cellAlignments,
+        };
     }
     const viewport = resolvedWindow.viewport;
     const rowWindow = resolveRowInfoWindow(
@@ -216,7 +233,6 @@ export function readWorkbookSheetWindow(
         viewport.clampedEndRow
     );
 
-    const alignmentCache = new Map<number, CellStyleAlignment | null>();
     const rowMetadata = collectRowWindowMetadata(
         workbook,
         cache.base.rowInfos,
@@ -226,14 +242,6 @@ export function readWorkbookSheetWindow(
     const columnMetadata = collectColumnWindowMetadata(
         workbook,
         cache.columnDefinitions,
-        viewport.clampedStartColumn,
-        viewport.clampedEndColumn,
-        alignmentCache
-    );
-    const cellResult = readWindowCells(
-        workbook,
-        cache,
-        rowWindow,
         viewport.clampedStartColumn,
         viewport.clampedEndColumn,
         alignmentCache
@@ -250,7 +258,7 @@ export function readWorkbookSheetWindow(
             viewport.clampedEndRow,
             viewport.clampedStartColumn,
             viewport.clampedEndColumn
-        ),
+        ).map((comment) => ({ ...comment })),
         columnAlignments: columnMetadata.columnAlignments,
         columnCount: resolvedWindow.columnCount,
         columnStyleIds: columnMetadata.columnStyleIds,
@@ -412,6 +420,32 @@ function resolveFullSheetReadCache(workbook: Workbook, sheet: Sheet): SheetReadC
     const state = getOrCreateReadState(workbook);
     let cache = state.fullSheetCaches.get(sheet.path);
     if (cache) {
+        return cache;
+    }
+
+    const prepared = getPreparedSheetReadModel(workbook, sheet.path);
+    if (prepared) {
+        const rowInfos = prepared.rows.map((row) => {
+            const analysis = analyzeScratchCells(row.cells);
+            return {
+                attributesSource: row.attributesSource,
+                rowNumber: row.rowNumber,
+                innerStart: 0,
+                innerEnd: 0,
+                minColumnNumber: row.cells[0]?.columnNumber ?? 0,
+                physicalMaxColumnNumber: row.cells[row.cells.length - 1]?.columnNumber ?? 0,
+                maxColumnNumber: analysis.maxColumnNumber,
+                used: analysis.used,
+            };
+        });
+        const base: BaseSheetReadCache = {
+            sheetXml: prepared.sheetXml,
+            rowInfos,
+            usedBounds: calculateUsedBounds(rowInfos),
+            preparedCells: new Map(prepared.rows.map((row) => [row.rowNumber, row.cells])),
+        };
+        cache = buildFullSheetReadCache(sheet, base, new Map());
+        state.fullSheetCaches.set(sheet.path, cache);
         return cache;
     }
 
@@ -621,6 +655,7 @@ function buildBaseSheetRowReadInfo(
         innerEnd,
         innerStart,
         maxColumnNumber: analysis.maxColumnNumber,
+        physicalMaxColumnNumber: scratchCells[scratchCells.length - 1]?.columnNumber ?? 0,
         minColumnNumber: scratchCells[0]?.columnNumber ?? 0,
         rowNumber,
         used: analysis.used,
@@ -713,6 +748,7 @@ function buildSheetRowReadInfo(
         innerEnd,
         innerStart,
         maxColumnNumber: analysis.maxColumnNumber,
+        physicalMaxColumnNumber: scratchCells[scratchCells.length - 1]?.columnNumber ?? 0,
         minColumnNumber: scratchCells[0]?.columnNumber ?? 0,
         rowNumber,
         used: analysis.used,
@@ -1100,13 +1136,33 @@ function readWindowCells(
     for (let index = rowWindow.startIndex; index < rowWindow.endExclusiveIndex; index += 1) {
         const rowInfo = base.rowInfos[index]!;
         if (
-            rowInfo.maxColumnNumber === 0 ||
-            rowInfo.maxColumnNumber < startColumn ||
+            rowInfo.minColumnNumber === 0 ||
+            (rowInfo.physicalMaxColumnNumber ?? 0) < startColumn ||
             rowInfo.minColumnNumber > endColumn
         ) {
             continue;
         }
 
+        const prepared = base.preparedCells?.get(rowInfo.rowNumber);
+        if (prepared) {
+            for (const cell of prepared) {
+                if (cell.columnNumber < startColumn || cell.columnNumber > endColumn) {
+                    continue;
+                }
+                const address = numberToColumnLabel(cell.columnNumber) + rowInfo.rowNumber;
+                appendWindowCell(
+                    workbook,
+                    cell.snapshot,
+                    address,
+                    rowInfo.rowNumber,
+                    cell.columnNumber,
+                    alignmentCache,
+                    cells,
+                    cellAlignments
+                );
+            }
+            continue;
+        }
         let cellCursor = rowInfo.innerStart;
         while (cellCursor < rowInfo.innerEnd) {
             const cellStart = base.sheetXml.indexOf("<c", cellCursor);
@@ -1152,31 +1208,54 @@ function readWindowCells(
                 columnNumber,
                 cache.sharedFormulaAnchors
             );
-            if (!isLogicalCellEntry(snapshot)) {
-                continue;
-            }
-
-            if (snapshot.styleId !== null) {
-                const alignment = resolveStyleAlignment(workbook, snapshot.styleId, alignmentCache);
-                if (alignment) {
-                    cellAlignments[address] = alignment;
-                }
-            }
-
-            const cellEntry: CellEntry = {
+            appendWindowCell(
+                workbook,
+                snapshot,
                 address,
+                rowInfo.rowNumber,
                 columnNumber,
-                rowNumber: rowInfo.rowNumber,
-                ...snapshot,
-            };
-            cells.push({
-                ...cellEntry,
-                displayValue: formatCellDisplayValue(snapshot),
-            });
+                alignmentCache,
+                cells,
+                cellAlignments
+            );
         }
     }
 
     return { cellAlignments, cells };
+}
+
+function appendWindowCell(
+    workbook: Workbook,
+    snapshot: CellSnapshot,
+    address: string,
+    rowNumber: number,
+    columnNumber: number,
+    alignmentCache: Map<number, CellStyleAlignment | null>,
+    cells: SheetWindowCell[],
+    cellAlignments: Record<string, CellStyleAlignment>
+): void {
+    if (snapshot.styleId !== null) {
+        const alignment = resolveStyleAlignment(workbook, snapshot.styleId, alignmentCache);
+        if (alignment) {
+            cellAlignments[address] = alignment;
+        }
+    }
+    if (!isLogicalCellEntry(snapshot)) {
+        return;
+    }
+    cells.push({
+        address,
+        columnNumber,
+        rowNumber,
+        exists: snapshot.exists,
+        error: snapshot.error ? { ...snapshot.error } : null,
+        formula: snapshot.formula,
+        rawType: snapshot.rawType,
+        styleId: snapshot.styleId,
+        type: snapshot.type,
+        value: snapshot.value,
+        displayValue: formatCellDisplayValue(snapshot),
+    });
 }
 
 function readValueWindowCells(

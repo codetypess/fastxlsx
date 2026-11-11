@@ -1,9 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { unzipSync, zipSync } from "fflate";
+import { deflateRawSync } from "node:zlib";
+import { unzipSync, Zip as ZipWriter, ZipPassThrough } from "fflate";
 
 import type { ArchiveEntry } from "./types.js";
+
+// Each archive entry is pushed once, with its complete uncompressed bytes.
+// fflate owns CRC, UTF-8 names, headers, data descriptors, and central directory.
+class NativeZipDeflate extends ZipPassThrough {
+    override compression = 8;
+
+    protected override process(chunk: Uint8Array, final: boolean): void {
+        this.ondata(null, deflateRawSync(chunk, { level: 6 }), final);
+    }
+}
 
 export class Zip {
     async readArchive(filePath: string): Promise<ArchiveEntry[]> {
@@ -34,12 +45,34 @@ export class Zip {
     }
 
     writeArchiveData(entries: Iterable<ArchiveEntry>): Uint8Array {
-        const sources: Record<string, Uint8Array> = {};
+        const sources = new Map<string, Uint8Array>();
         for (const entry of entries) {
-            sources[entry.path] = entry.data;
+            sources.set(entry.path, entry.data);
         }
 
-        return zipSync(sources, { level: 6 });
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        const archive = new ZipWriter((error, chunk) => {
+            if (error) {
+                throw error;
+            }
+            chunks.push(chunk);
+            size += chunk.length;
+        });
+        for (const [path, data] of sources) {
+            const entry = new NativeZipDeflate(path);
+            archive.add(entry);
+            entry.push(data, true);
+        }
+        archive.end();
+
+        const result = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return result;
     }
 
     async readDirectoryEntries(

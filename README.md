@@ -292,6 +292,12 @@ The lossless-first direction flips that approach:
 
 That makes it much easier to satisfy a strict "roundtrip without diffs" requirement.
 
+## Caching sheet reads
+
+`workbook.getSheetReadVersion(sheetName)` finalizes pending batch writes and returns an opaque sheet-read token. Within the same Workbook instance, an unchanged token allows reuse of a complete sheet read, including layout and comments. Worksheet writes invalidate that sheet; other package writes/removals conservatively invalidate all sheet tokens, including styles, shared strings, relationships and workbook metadata. Tokens are not file hashes and must not be compared across instances.
+
+Batch finalization can reuse its parsed cell state for subsequent full-window reads. Pending changes to existing shared-formula cells use the XML fallback; unrelated edits can reuse already resolved shared followers. Values, formulas and serialization keep the existing semantics. Returned windows remain detached from the internal cache.
+
 ## Current API
 
 - `Workbook.open(path)`
@@ -309,6 +315,7 @@ That makes it much easier to satisfy a strict "roundtrip without diffs" requirem
 - `workbook.tryGetSheet(name)`
 - `workbook.getActiveSheet()`
 - `workbook.batch(applyChanges)`
+- `workbook.getSheetReadVersion(sheetName)`
 - `workbook.getNumberFormat(numFmtId)`
 - `workbook.updateNumberFormat(numFmtId, formatCode)`
 - `workbook.cloneNumberFormat(numFmtId, formatCode?)`

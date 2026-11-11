@@ -1,3 +1,4 @@
+import { publishPreparedSheetReadModel } from "./workbook/workbook-mutation-read.js";
 import { Cell } from "./cell.js";
 import type {
     AutoFilterColumn,
@@ -52,11 +53,14 @@ import { XlsxError } from "./errors.js";
 import { recalculateCellFormula, recalculateSheetFormulas } from "./formula/formula-recalc.js";
 import {
     buildSheetIndex,
+    calculateUsedBounds,
     getLocatedCell,
     parseCellSnapshot,
     type LocatedCell,
     type LocatedRow,
     type SheetIndex,
+    type UsedBoundsCell,
+    type UsedBoundsRow,
 } from "./sheet/sheet-index.js";
 import {
     compareCellAddresses,
@@ -1913,8 +1917,9 @@ export class Sheet {
      * Lists worksheet comments.
      */
     getComments(): SheetComment[] {
+        this.ensureReadableState();
         const parts = findSheetCommentParts(
-            this.getSheetIndex().xml,
+            this.workbook.readEntryText(this.path),
             this.path,
             this.readSheetRelationshipsXml()
         );
@@ -2473,16 +2478,9 @@ export class Sheet {
             shiftRangeRefRows(range, rowNumber, count)
         );
 
-        for (const sourceRowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
-            const row = index.rows.get(sourceRowNumber);
-            if (!row) {
-                continue;
-            }
-
-            const nextRowXml = transformRowXml(index.xml, row, this.name, 0, 0, rowNumber, count);
-            nextSheetXml =
-                nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
-        }
+        nextSheetXml = rewriteStructuralRows(index, (row) =>
+            transformRowXml(index.xml, row, this.name, 0, 0, rowNumber, count)
+        );
 
         nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
         nextSheetXml = transformWorksheetStructureReferences(
@@ -2527,24 +2525,11 @@ export class Sheet {
             shiftRangeRefColumns(range, columnNumber, count)
         );
 
-        for (const rowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
-            const row = index.rows.get(rowNumber);
-            if (!row || row.selfClosing || row.cells.length === 0) {
-                continue;
-            }
-
-            const nextRowXml = transformRowXml(
-                index.xml,
-                row,
-                this.name,
-                columnNumber,
-                count,
-                0,
-                0
-            );
-            nextSheetXml =
-                nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
-        }
+        nextSheetXml = rewriteStructuralRows(index, (row) =>
+            row.selfClosing || row.cells.length === 0
+                ? index.xml.slice(row.start, row.end)
+                : transformRowXml(index.xml, row, this.name, columnNumber, count, 0, 0)
+        );
 
         nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
         nextSheetXml = transformColumnStyleDefinitions(nextSheetXml, columnNumber, count, "shift");
@@ -2591,21 +2576,11 @@ export class Sheet {
             .map((range) => deleteRangeRefRows(range, rowNumber, count))
             .filter((range): range is string => range !== null);
 
-        for (const sourceRowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
-            const row = index.rows.get(sourceRowNumber);
-            if (!row) {
-                continue;
-            }
-
-            if (sourceRowNumber >= rowNumber && sourceRowNumber <= deleteEndRow) {
-                nextSheetXml = nextSheetXml.slice(0, row.start) + nextSheetXml.slice(row.end);
-                continue;
-            }
-
-            const nextRowXml = deleteRowTransform(index.xml, row, this.name, rowNumber, count);
-            nextSheetXml =
-                nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
-        }
+        nextSheetXml = rewriteStructuralRows(index, (row) =>
+            row.rowNumber >= rowNumber && row.rowNumber <= deleteEndRow
+                ? ""
+                : deleteRowTransform(index.xml, row, this.name, rowNumber, count)
+        );
 
         nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
         nextSheetXml = transformWorksheetStructureReferences(
@@ -2650,22 +2625,9 @@ export class Sheet {
             .map((range) => deleteRangeRefColumns(range, columnNumber, count))
             .filter((range): range is string => range !== null);
 
-        for (const rowNumber of [...index.rowNumbers].sort((left, right) => right - left)) {
-            const row = index.rows.get(rowNumber);
-            if (!row) {
-                continue;
-            }
-
-            const nextRowXml = deleteColumnTransform(
-                index.xml,
-                row,
-                this.name,
-                columnNumber,
-                count
-            );
-            nextSheetXml =
-                nextSheetXml.slice(0, row.start) + nextRowXml + nextSheetXml.slice(row.end);
-        }
+        nextSheetXml = rewriteStructuralRows(index, (row) =>
+            deleteColumnTransform(index.xml, row, this.name, columnNumber, count)
+        );
 
         nextSheetXml = updateMergedRanges(nextSheetXml, nextMergedRanges);
         nextSheetXml = transformColumnStyleDefinitions(nextSheetXml, columnNumber, count, "delete");
@@ -4134,7 +4096,26 @@ export class Sheet {
 
     finalizeBatchWrite(): void {
         if (this.hasPendingCellMutations) {
-            this.flushPendingCellMutations();
+            const baseIndex = this.getSheetIndex(false);
+            const mutations = [...this.pendingCellMutations.values()];
+            const xml = applyPendingCellMutationsToSheetXml(baseIndex, mutations);
+            const usedBounds = calculatePendingUsedBounds(baseIndex, mutations);
+            const finalizedXml = updateDimensionRef({ xml, usedBounds });
+            this.workbook.writeEntryText(this.path, finalizedXml);
+            publishPreparedSheetReadModel(
+                this.workbook,
+                this.path,
+                finalizedXml,
+                baseIndex,
+                mutations
+            );
+            // String offsets belong to the previous XML. Rebuild on demand.
+            this.sheetIndex = undefined;
+            this.pendingCellMutations.clear();
+            this.hasPendingCellMutations = false;
+            this.hasPendingBatchWrite = false;
+            this.revision += 1;
+            return;
         }
 
         if (!this.hasPendingBatchWrite || !this.sheetIndex) {
@@ -4143,10 +4124,13 @@ export class Sheet {
 
         const normalizedSheetXml = updateDimensionRef(this.sheetIndex);
         this.workbook.writeEntryText(this.path, normalizedSheetXml);
-        this.sheetIndex =
-            normalizedSheetXml === this.sheetIndex.xml
-                ? this.sheetIndex
-                : buildSheetIndex(this.workbook, normalizedSheetXml);
+        publishPreparedSheetReadModel(
+            this.workbook,
+            this.path,
+            normalizedSheetXml,
+            this.sheetIndex
+        );
+        this.sheetIndex = normalizedSheetXml === this.sheetIndex.xml ? this.sheetIndex : undefined;
         this.hasPendingBatchWrite = false;
         this.revision += 1;
     }
@@ -4166,6 +4150,55 @@ interface CurrentCellWriteState {
     attributesSource?: string;
     cellXml?: string;
     snapshot: CellSnapshot;
+}
+
+function rewriteStructuralRows(
+    index: SheetIndex,
+    transformRow: (row: LocatedRow) => string
+): string {
+    const parts: string[] = [];
+    let cursor = 0;
+    // Physical order also preserves whitespace and extension nodes between rows.
+    for (const row of [...index.rows.values()].sort((left, right) => left.start - right.start)) {
+        parts.push(index.xml.slice(cursor, row.start), transformRow(row));
+        cursor = row.end;
+    }
+    parts.push(index.xml.slice(cursor));
+    return parts.join("");
+}
+
+function calculatePendingUsedBounds(
+    index: SheetIndex,
+    mutations: PendingCellMutation[]
+): SheetIndex["usedBounds"] {
+    const rows = new Map<number, UsedBoundsRow>(index.rows);
+    const changedRows = new Map<number, Map<number, UsedBoundsCell>>();
+    for (const mutation of mutations) {
+        let cells = changedRows.get(mutation.rowNumber);
+        if (!cells) {
+            cells = new Map(
+                (rows.get(mutation.rowNumber)?.cells ?? []).map((cell) => [cell.columnNumber, cell])
+            );
+            changedRows.set(mutation.rowNumber, cells);
+        }
+        if (mutation.kind === "delete") {
+            cells.delete(mutation.columnNumber);
+        } else {
+            cells.set(mutation.columnNumber, {
+                columnNumber: mutation.columnNumber,
+                snapshot: mutation.snapshot,
+            });
+        }
+    }
+    for (const [rowNumber, cells] of changedRows) {
+        rows.set(rowNumber, {
+            cells: [...cells.values()].sort(
+                (left, right) => left.columnNumber - right.columnNumber
+            ),
+            maxColumnNumber: 0,
+        });
+    }
+    return calculateUsedBounds(rows, [...rows.keys()]);
 }
 
 interface SortSourceCell {

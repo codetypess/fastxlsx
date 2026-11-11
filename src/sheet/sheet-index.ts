@@ -42,7 +42,6 @@ interface UsedRangeBounds {
 
 export interface SheetIndex {
     xml: string;
-    cells: Map<string, LocatedCell> | null;
     rows: Map<number, LocatedRow>;
     rowNumbers: number[];
     usedBounds: UsedRangeBounds | null;
@@ -222,7 +221,6 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
 
     return {
         xml: sheetXml,
-        cells: null,
         rows,
         rowNumbers,
         usedBounds: calculateUsedBounds(rows, rowNumbers),
@@ -232,25 +230,17 @@ export function buildSheetIndex(workbook: Workbook, sheetXml: string): SheetInde
 }
 
 export function getLocatedCell(index: SheetIndex, address: string): LocatedCell | undefined {
-    if (!index.cells) {
-        index.cells = new Map<string, LocatedCell>();
-
-        for (const rowNumber of index.rowNumbers) {
-            const row = index.rows.get(rowNumber);
-            if (!row) {
-                continue;
-            }
-
-            for (const cell of row.cells) {
-                index.cells.set(cell.address, cell);
-            }
-        }
-    }
-
-    return index.cells.get(address);
+    const { rowNumber, columnNumber } = parseCellAddressFast(address);
+    return index.rows.get(rowNumber)?.cellsByColumn[columnNumber];
 }
 
-function analyzeRowCells(cells: LocatedCell[]): { hasUsedCells: boolean; maxColumnNumber: number } {
+export type UsedBoundsCell = Pick<LocatedCell, "columnNumber" | "snapshot">;
+export interface UsedBoundsRow {
+    cells: UsedBoundsCell[];
+    maxColumnNumber: number;
+}
+
+function analyzeRowCells(cells: UsedBoundsCell[]): { hasUsedCells: boolean; maxColumnNumber: number } {
     if (cells.length === 0) {
         return { hasUsedCells: false, maxColumnNumber: 0 };
     }
@@ -293,8 +283,8 @@ function analyzeRowCells(cells: LocatedCell[]): { hasUsedCells: boolean; maxColu
     return { hasUsedCells: true, maxColumnNumber: logicalMaxColumnNumber };
 }
 
-function calculateUsedBounds(
-    rows: Map<number, LocatedRow>,
+export function calculateUsedBounds(
+    rows: ReadonlyMap<number, UsedBoundsRow>,
     rowNumbers: number[]
 ): UsedRangeBounds | null {
     let minRow = Number.POSITIVE_INFINITY;
@@ -326,7 +316,7 @@ function calculateUsedBounds(
 }
 
 function isUsedCell(snapshot: CellSnapshot | undefined): boolean {
-    return snapshot !== undefined && (snapshot.formula !== null || snapshot.value !== null);
+    return snapshot !== undefined && (snapshot.type === "formula" || snapshot.value !== null);
 }
 
 export function parseCellAddressFast(address: string): { rowNumber: number; columnNumber: number } {
@@ -813,15 +803,48 @@ function resolveSharedFormulaSnapshots(rows: Map<number, LocatedRow>, rowNumbers
             continue;
         }
 
-        cell.snapshot = {
-            ...cell.snapshot,
-            formula: translateFormulaReferences(
-                anchor.formula,
-                cell.columnNumber - anchor.columnNumber,
-                cell.rowNumber - anchor.rowNumber
-            ),
-            type: "formula",
-        };
+        // Cached-value reads and structural writes do not need expanded formula
+        // text. Capture the original anchor so retained snapshots stay stable
+        // even when a later edit creates a new worksheet index.
+        const snapshot = cell.snapshot;
+        const columnDelta = cell.columnNumber - anchor.columnNumber;
+        const rowDelta = cell.rowNumber - anchor.rowNumber;
+        let cachedFormula: string | null | undefined;
+        snapshot.type = "formula";
+        Object.defineProperty(snapshot, "formula", {
+            configurable: true,
+            enumerable: true,
+            get() {
+                if (cachedFormula === undefined) {
+                    cachedFormula = translateFormulaReferences(anchor.formula, columnDelta, rowDelta);
+                }
+                // Public snapshots can be sealed or frozen before their first
+                // formula read. They still resolve without mutating properties.
+                if (Object.getOwnPropertyDescriptor(snapshot, "formula")?.configurable) {
+                    Object.defineProperty(snapshot, "formula", {
+                        configurable: true,
+                        enumerable: true,
+                        writable: true,
+                        value: cachedFormula,
+                    });
+                }
+                return cachedFormula;
+            },
+            set(formula: string | null) {
+                if (Object.isFrozen(snapshot)) {
+                    throw new TypeError("Cannot assign formula on a frozen cell snapshot");
+                }
+                cachedFormula = formula;
+                if (Object.getOwnPropertyDescriptor(snapshot, "formula")?.configurable) {
+                    Object.defineProperty(snapshot, "formula", {
+                        configurable: true,
+                        enumerable: true,
+                        writable: true,
+                        value: formula,
+                    });
+                }
+            },
+        });
     }
 }
 
