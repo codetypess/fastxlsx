@@ -15,9 +15,13 @@ test("symlinked CLI entry prints help output", async () => {
         const symlinkPath = join(tempRoot, "fastxlsx");
         await symlink(resolve("src/cli.ts"), symlinkPath);
 
-        const result = spawnSync(process.execPath, ["--import", "tsx", symlinkPath, "--help"], {
-            encoding: "utf8",
-        });
+        const result = spawnSync(
+            process.execPath,
+            ["--no-deprecation", "--import", "tsx", symlinkPath, "--help"],
+            {
+                encoding: "utf8",
+            }
+        );
 
         assert.equal(result.status, 0);
         assert.match(result.stdout, /Usage: fastxlsx \[options\] \[command\]/);

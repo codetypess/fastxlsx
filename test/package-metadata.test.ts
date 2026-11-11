@@ -22,7 +22,7 @@ test("package metadata exposes JS and type entrypoints for legacy TS resolution"
 
     assert.equal(packageJson.main, "./dist/src/index.js");
     assert.equal(packageJson.types, "./dist/src/index.d.ts");
-    assert.equal(packageJson.bin?.fastxlsx, "./dist/src/cli.js");
+    assert.equal(packageJson.bin?.fastxlsx, "dist/src/cli.js");
     assert.equal(packageJson.exports?.["."].import, "./dist/src/index.js");
     assert.equal(packageJson.exports?.["."].types, "./dist/src/index.d.ts");
 });
@@ -43,6 +43,7 @@ test("packed tarball exposes runnable entrypoints without stale build artifacts"
             ["pack", "--json", "--pack-destination", tempRoot],
             {
                 npm_config_cache: npmCache,
+                npm_config_dry_run: "false",
             }
         );
         const packPayload = JSON.parse(packResult.stdout) as Array<{ filename: string }>;

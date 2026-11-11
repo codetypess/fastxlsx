@@ -7,7 +7,7 @@
   "author": "codetypes",
   "repository": {
     "type": "git",
-    "url": "https://github.com/codetypess/fastxlsx.git"
+    "url": "git+https://github.com/codetypess/fastxlsx.git"
   },
   "homepage": "https://github.com/codetypess/fastxlsx#readme",
   "bugs": {
@@ -16,7 +16,7 @@
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "bin": {
-    "fastxlsx": "./dist/src/cli.js"
+    "fastxlsx": "dist/src/cli.js"
   },
   "exports": {
     ".": {
